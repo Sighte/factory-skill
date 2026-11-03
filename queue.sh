@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Schwerer Job (volle Python-Suite, docker build) über die Warteschlange aller Factory-Läufe.
-# Aufruf (mit run_in_background starten, dann auf die Benachrichtigung warten):
-#   bash queue.sh <L> <slug>-<job> <ausgabedatei> <befehl …>
-# Wartet, bis das eigene Ticket vorne ist, hält es per Herzschlag frisch, räumt Tickets ohne
-# Lebenszeichen seit 5 min weg, führt den Befehl aus, gibt das Ticket immer zurück und zeigt
-# die letzten Zeilen der Ausgabe. Exit-Code = der des Befehls.
+# Heavy job (full Python suite, docker build) via the queue shared by all factory runs.
+# Usage (start with run_in_background, then wait for the notification):
+#   bash queue.sh <L> <slug>-<job> <output-file> <command …>
+# Waits until its own ticket is at the front, keeps it fresh via heartbeat, clears away tickets with
+# no sign of life for 5 min, runs the command, always releases the ticket and shows
+# the last lines of the output. Exit code = that of the command.
 set -u
 L=$1 NAME=$2 OUT=$3; shift 3
 Q="$L/queue"; mkdir -p "$Q"
