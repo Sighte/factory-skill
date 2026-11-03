@@ -45,7 +45,7 @@ die projektneutrale Fassung. Alles Projektspezifische steckt in **einer** Datei,
 | `reviewers.md` | Prüflisten, Zuständigkeit und Antwortformat der Reviewer |
 | `queue.sh` | Warteschlange für schwere Jobs (generisch, unverändert nutzbar) |
 | `factory.config.example.md` | Vorlage für den Projekt-Adapter — alle Slots |
-| `examples/meetingagent.factory.config.md` | Ausgefülltes Beispiel aus dem Ursprungsprojekt |
+| `examples/meetingagent.factory.config.md` | Ausgefülltes Beispiel aus dem Ursprungsprojekt (enthält interne Namen/URLs — vor einer Veröffentlichung des Repos entfernen) |
 
 ## Voraussetzungen
 
@@ -75,8 +75,9 @@ Optional:
    ```
    Startet die Session nicht im Repo, sondern in einem Oberordner (Worktrees als
    Geschwister), dort `.claude/skills/factory` als Verknüpfung auf den Repo-Ordner anlegen.
-2. `factory.config.example.md` nach `<repo>/.claude/factory.config.md` kopieren und **jeden**
-   Slot füllen. Am schnellsten: Claude in einer Session bitten, „die factory.config.md für
+2. `factory.config.example.md` nach `$R/factory.config.md` kopieren (Session-Ordner,
+   **außerhalb** des Repos — die Config nennt Ort und Runner der versiegelten Tests, und
+   Implementer lesen den Worktree) und **jeden** Slot füllen. Am schnellsten: Claude in einer Session bitten, „die factory.config.md für
    dieses Repo anhand der Vorlage auszufüllen“ — und das Ergebnis selbst prüfen (Branches,
    geschützte Jobs, Testbefehle).
 3. In die Projektregeln (`CLAUDE.md`) aufnehmen:
