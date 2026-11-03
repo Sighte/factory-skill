@@ -3,11 +3,89 @@
 Ein Claude-Code-Skill, der aus **einer Zeile Feature-Idee** einen kompletten, geprüften Commit
 auf deinem Integrations-Branch macht:
 
+## Architektur
+
+### Ablauf eines Laufs
+
+```mermaid
+flowchart TD
+    idea(["/factory &quot;Idee&quot;"]) --> intake["1 · Intake & Preflight<br/>Slug, Lauf-Sperre, Worktree W,<br/>externe Voraussetzungen per curl"]
+    intake --> tier{"Vorab-Stufe"}
+    tier -- "S" --> plan["2 · Kurzplan<br/>(Hauptagent, ohne OpenSpec)"]
+    tier -- "M / L" --> spec["2 · Spec-Agent<br/>OpenSpec: Anforderungen A1…An,<br/>Schnittstellen, Testplan, Weichen"]
+    spec --> deps["Abhängigkeits-Prüfer<br/>Tasks ergänzen, Stufe festlegen"]
+    plan --> gate
+    deps --> gate{{"3 · GATE – die einzige Rückfrage<br/>≤ 3 Weichen + Bauen / Ändern / Abbrechen"}}
+    gate -- "Ändern" --> spec
+    gate -- "Abbrechen" --> stop(["Ende, Arbeit bleibt liegen"])
+    gate -- "Bauen" --> author & build
+
+    author["3b · Test-Autor<br/>schreibt versiegelte Abnahmetests<br/>nur aus Spec + altem Code"]:::sealed --> Z[("Z · versiegelt<br/>außerhalb Repo & Spec<br/>+ sha256-Manifest")]:::sealed
+    build["4 · Build<br/>Implementer je Task-Gruppe (SDD),<br/>eigene TDD-Tests, Commits in W"] --> verify
+
+    Z -.->|nur Ergebnis| verify
+    verify["5 · Verify<br/>volle Suite · Abnahmetests · Artefakt-Build<br/>Szenario-Harness · Vorschau-Instanz"]
+    verify -- "rot" --> judge["Abnahme-Richter<br/>übersetzt in: A3 erwartet X, beobachtet Y"]:::sealed
+    judge --> fixA["Fix-Agent (frisch)<br/>sieht nur die Rückmeldung"] --> verify
+    verify -- "grün" --> review
+
+    review["6 · Review-Schleife (parallel)<br/>Security · Laufzeit · Abhängigkeiten · UI/UX"]
+    review -- "CHANGES_REQUESTED<br/>(max. 2 bzw. 5 Runden)" --> fixR["Fix-Agent<br/>ein Commit je Runde"] --> verify
+    review -- "alle APPROVED" --> ship
+
+    ship["7 · Ship (unter Push-Sperre)<br/>Abnahmetests committen → rebase →<br/>Tests → push TARGET_BRANCH"] --> report
+    report(["8 · Report-Artifact + Aufräumen<br/>Status ehrlich: „gepusht – Live-Test offen“"])
+
+    classDef sealed fill:#fde7e7,stroke:#c0392b,color:#000
 ```
-Idee → Spec (OpenSpec) → Gate (eine Rückfrage) → versiegelte Abnahmetests ┐
-                                               → Build (Subagents)         ┴→ Verify
-     → Review-Schleife (Security / Laufzeit / Abhängigkeiten / UI) → Push → Report
+
+Abbruch ist aus jedem Schritt ab 3b möglich (Grenzen für Reparaturen und Runden stehen im
+Protokoll): Arbeit wird als `wip` committet, Feature-Branch gesichert, ein späterer Aufruf
+mit demselben Slug setzt fort.
+
+### Wer sieht die Abnahmetests?
+
+```mermaid
+flowchart LR
+    subgraph sichtbar["sieht Code & Spec – nicht die Abnahmetests"]
+        impl["Implementer"]
+        fix["Fix-Agenten"]
+        rev["Reviewer"]
+        main["Hauptagent<br/>(Orchestrator)"]
+    end
+    subgraph versiegelt["versiegelt"]
+        author["Test-Autor"]:::sealed
+        Z[("Z · Abnahmetests")]:::sealed
+        judge["Abnahme-Richter"]:::sealed
+    end
+    W[("Worktree W<br/>+ Spec S")]
+
+    impl & fix -- "lesen/schreiben" --> W
+    rev -- "lesen" --> W
+    author -- "schreibt" --> Z
+    judge -- "liest" --> Z
+    Z -- "nur: bestanden N/M,<br/>rote Test-IDs" --> main
+    judge -- "gefilterte Rückmeldung<br/>(Anforderung, kein Testcode)" --> fix
+    main -- "Ergebnis als Zahl" --> rev
+
+    classDef sealed fill:#fde7e7,stroke:#c0392b,color:#000
 ```
+
+### Parallelbetrieb
+
+```mermaid
+flowchart LR
+    r1["Lauf A"] & r2["Lauf B"] & r3["Lauf C"] --> L
+    subgraph L["L · Sperren-Ordner"]
+        run["run-&lt;slug&gt;/<br/>ein Lauf je Slug"]
+        q["queue/<br/>FIFO für schwere Jobs<br/>(volle Suite, Builds, Harness)"]
+        push["push/<br/>genau ein Lauf von rebase bis push"]
+    end
+    push --> origin[("origin/TARGET_BRANCH")]
+```
+
+Alle Sperren mit `mkdir` (atomar) und Herzschlag per `touch`; verwaiste Sperren räumt der
+nächste Lauf weg.
 
 Herkunft: im MeetingAgent-Projekt über ~10 echte Läufe entstanden und nachgeschärft; dies ist
 die projektneutrale Fassung. Alles Projektspezifische steckt in **einer** Datei,
