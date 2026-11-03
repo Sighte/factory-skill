@@ -1,578 +1,578 @@
 ---
 name: factory
-description: Spec-driven Software Factory. Aus einer Feature-Idee wird ein OpenSpec-Change, nach genau einer Freigabe wird gebaut, gegen versiegelte Abnahmetests geprüft, die der bauende Agent nicht kennt, in einer Review-Schleife geprüft und direkt in den Ziel-Branch gepusht. Verwenden bei "/factory <Idee>", "factory", "bau mir das komplett". Setzt einen abgebrochenen Lauf fort, wenn es den Slug schon gibt.
+description: Spec-driven Software Factory. A feature idea becomes an OpenSpec change; after exactly one approval gate it is built, checked against sealed acceptance tests that the building agent does not know, checked in a review loop, and pushed directly to the target branch. Use for "/factory <idea>", "factory", "build this end to end". Resumes an aborted run if the slug already exists.
 ---
 
-# /factory "<Feature-Idee>"
+# /factory "<feature idea>"
 
-Fährt die ganze Kette für **eine** Idee. Genau **eine** Rückfrage (Gate, Schritt 3), sonst
-läuft alles durch — auch eingebundene Skills stellen keine Fragen (siehe Schritt 2 und 4).
+Runs the whole chain for **one** idea. Exactly **one** question to the user (approval gate, step 3); otherwise
+everything runs through — embedded skills ask no questions either (see steps 2 and 4).
 
-**Projekt-Adapter:** Alle projekt­spezifischen Werte (Branches, Testbefehle, Pfade, Reviewer-
-Zuständigkeit, Stufen-Kriterien, Vorschau, Harness) stehen in `factory.config.md` des Projekts
-(Suche: zuerst `$R/factory.config.md` — außerhalb des Worktrees, damit Implementer `SEALED_ROOT` und `ACCEPTANCE_RUN` nicht lesen —, dann `<repo>/.claude/factory.config.md`). Im Text unten
-stehen sie als `{{SLOT}}`. **Fehlt die Datei oder ein Pflicht-Slot, anhalten** und sagen,
-welcher fehlt (Vorlage: `factory.config.example.md` neben dieser Datei). Ein leerer
-optionaler Slot heißt: der zugehörige Teil entfällt (und das steht im Report).
+**Project adapter:** All project-specific values (branches, test commands, paths, reviewer
+responsibilities, tier criteria, preview, harness) live in the project's `factory.config.md`
+(lookup: first `$R/factory.config.md` — outside the worktree, so implementers cannot read `SEALED_ROOT` and `ACCEPTANCE_RUN` —, then `<repo>/.claude/factory.config.md`). In the text below
+they appear as `{{SLOT}}`. **If the file or a required slot is missing, stop** and say
+which one is missing (template: `factory.config.example.md` next to this file). An empty
+optional slot means: the corresponding part is skipped (and that is stated in the report).
 
-Shells — auch die der Subagents — starten im Session-Ordner, und `cd` überlebt einen
-Aufruf nicht. Deshalb arbeitet der Skill nur mit **absoluten** Pfaden, die im Protokollkopf
-stehen (bei `{{PATH_STYLE}} = windows` im Windows-Format per `pwd -W`):
+Shells — including those of subagents — start in the session folder, and `cd` does not survive
+a call. That is why the skill works only with **absolute** paths, which are recorded in the log header
+(with `{{PATH_STYLE}} = windows` in Windows format via `pwd -W`):
 
-| | Pfad |
+| | Path |
 |---|---|
-| `R` | `{{SESSION_ROOT}}` (Session-Ordner; enthält `M` und den OpenSpec-Ordner) |
-| `M` | `$R/{{REPO_DIR}}` — Checkout auf `{{TARGET_BRANCH}}`, ggf. Mount der gemeinsamen Instanz |
-| `W` | `{{WORKTREE_PATTERN}}` — Worktree dieses Laufs |
-| `S` | `{{OPENSPEC_DIR}}/changes/<slug>` — Spec, Tasks, Protokoll |
-| `L` | `{{LOCK_DIR}}` — Sperren und Warteschlange |
-| `Z` | `{{SEALED_ROOT}}/<slug>-<zufall>` — **versiegelte Abnahmetests** (siehe „Abnahmetests“) |
-| `T` | `{{HARNESS_DIR}}` — optionale Szenario-Harness (echtes Artefakt gegen eine Attrappe) |
-| `K` | Ordner dieser `SKILL.md` (für `queue.sh`) |
+| `R` | `{{SESSION_ROOT}}` (session folder; contains `M` and the OpenSpec folder) |
+| `M` | `$R/{{REPO_DIR}}` — checkout on `{{TARGET_BRANCH}}`, possibly the mount of the shared instance |
+| `W` | `{{WORKTREE_PATTERN}}` — worktree of this run |
+| `S` | `{{OPENSPEC_DIR}}/changes/<slug>` — spec, tasks, log |
+| `L` | `{{LOCK_DIR}}` — locks and queue |
+| `Z` | `{{SEALED_ROOT}}/<slug>-<random>` — **sealed acceptance tests** (see "Sealed acceptance tests") |
+| `T` | `{{HARNESS_DIR}}` — optional scenario harness (real artifact against a mock) |
+| `K` | folder of this `SKILL.md` (for `queue.sh`) |
 
-Git immer mit `git -C "$W"` bzw. `git -C "$M"`. Fehlt der Skill `openspec-propose`, anhalten
-und sagen, dass die Session in `R` starten muss (dort liegen die OpenSpec-Skills).
+Always run git as `git -C "$W"` or `git -C "$M"`. If the skill `openspec-propose` is missing, stop
+and say that the session must start in `R` (the OpenSpec skills live there).
 
-## Harte Regeln
+## Hard rules
 
-- Nie `{{PROD_BRANCH}}`, nie `{{PROTECTED_JOBS}}`, nie ein MR/PR nach `{{PROD_BRANCH}}` —
-  das ist ein eigener Release-Ablauf.
-- Push nach `{{TARGET_BRANCH}}` nur, wenn die Tests grün sind, **die versiegelten
-  Abnahmetests grün sind** (in Stufen laut `{{ACCEPTANCE_TIERS}}`) **und** in der letzten
-  Review-Runde alle zuständigen Reviewer `APPROVED` gemeldet haben.
-- Das Gate nie überspringen, auch nicht bei „kleinen“ Ideen.
-- **Kein Agent, der Code für den Lauf schreibt oder prüft, kennt die Abnahmetests** — weder
-  ihren Ort noch ihren Inhalt (Regeln im Abschnitt „Abnahmetests“). Auch der Hauptagent liest
-  sie nicht.
-- `{{SECRETS_RULES}}` — keine Secrets lesen oder ausgeben, keine echten Mails/Zahlungen/
-  externen Seiteneffekte.
-- `M` wird **nie** verändert — dort arbeiten andere Sessions. Einzige Ausnahme: der Pull nach
-  dem Push, und nur wenn dort nichts offen ist.
-- Die gemeinsame Instanz `{{SHARED_INSTANCE}}` ist **nur zum Ansehen** — für jeden Agenten des
-  Laufs: `{{SHARED_INSTANCE_DONTS}}`. Alles, was schreibt oder abmeldet, nur in der eigenen
-  Vorschau `:$P` (eigene Kopie der Daten).
-- Jeder Stand, den ein Reviewer sehen soll, ist **committet**. Reviewer sehen nur Commits.
-- Nur eigene Ressourcen anfassen (Namen mit dem eigenen Slug, eigener Port, eigene Sperre).
-  Fremde `factory-*`-Container, Worktrees, Images und Sperren nie löschen, nur nennen.
+- Never `{{PROD_BRANCH}}`, never `{{PROTECTED_JOBS}}`, never an MR/PR to `{{PROD_BRANCH}}` —
+  that is a separate release process.
+- Push to `{{TARGET_BRANCH}}` only if the tests are green, **the sealed
+  acceptance tests are green** (in tiers per `{{ACCEPTANCE_TIERS}}`) **and** in the last
+  review round all responsible reviewers reported `APPROVED`.
+- Never skip the approval gate, not even for "small" ideas.
+- **No agent that writes or checks code for the run knows the acceptance tests** — neither
+  their location nor their content (rules in the section "Sealed acceptance tests"). The orchestrator does not read
+  them either.
+- `{{SECRETS_RULES}}` — do not read or print secrets, no real emails/payments/
+  external side effects.
+- `M` is **never** modified — other sessions work there. Only exception: the pull after
+  the push, and only if nothing is pending there.
+- The shared instance `{{SHARED_INSTANCE}}` is **view-only** — for every agent of the
+  run: `{{SHARED_INSTANCE_DONTS}}`. Anything that writes or logs out happens only in the run's own
+  preview `:$P` (own copy of the data).
+- Every state a reviewer is supposed to see is **committed**. Reviewers only see commits.
+- Only touch your own resources (names with your own slug, your own port, your own lock).
+  Never delete other `factory-*` containers, worktrees, images or locks — only mention them.
 
-## Parallelbetrieb
+## Parallel operation
 
-Mehrere `/factory`-Läufe (und andere Sessions) laufen gleichzeitig. Alles Lauf-Eigene trägt
-den Slug im Namen; geteilt sind nur das Git-Repo, `origin/{{TARGET_BRANCH}}` und Docker.
-Sperren liegen in `$L` (geht an jeden Subagent) und entstehen mit `mkdir` (atomar — scheitert,
-wenn es sie schon gibt). **Herzschlag** heißt: wer eine Sperre oder ein Ticket hält oder
-darauf wartet, macht jede Minute `touch` darauf — bei langen Befehlen per Hintergrund-Schleife:
+Several `/factory` runs (and other sessions) run at the same time. Everything that belongs to a run carries
+the slug in its name; only the git repo, `origin/{{TARGET_BRANCH}}` and Docker are shared.
+Locks live in `$L` (passed to every subagent) and are created with `mkdir` (atomic — fails
+if it already exists). **Heartbeat** means: whoever holds a lock or a ticket, or is waiting
+for one, runs `touch` on it every minute — for long commands via a background loop:
 `( while sleep 60; do touch "$X" 2>/dev/null || break; done ) & HB=$!` … `kill $HB`.
 
-- **Lauf-Sperre** `$L/run-<slug>/`: verhindert, dass zwei Sessions denselben Lauf fahren.
-  Darin `owner` (Startzeit + Zufalls-ID; die ID steht auch im Protokollkopf). Bei jedem Protokolleintrag `touch` auf die Sperre.
-  Freigeben in Schritt 8, bei Abbruch und bei „Abbrechen“ am Gate. Ist sie schon da: letzter
-  `touch` jünger als 90 min → **anhalten** mit „läuft in einer anderen Session (letztes
-  Lebenszeichen vor N min); ist die abgestürzt: `rm -r $L/run-<slug>` und `/factory` erneut“.
-  Älter → verwaist, übernehmen (`owner` neu schreiben, ins Protokoll).
-- **Push-Sperre** `$L/push/`: hält genau ein Lauf von „rebase“ bis „push“ (Schritt 7),
-  damit sich Läufe auf `{{TARGET_BRANCH}}` nicht gegenseitig die Basis wegziehen. Der Halter
-  hält den Herzschlag die ganze Zeit (auch während er in der Warteschlange auf die Tests
-  wartet). Warten **im Hintergrund** mit `run_in_background`, dann auf die Benachrichtigung
-  warten — kein Vordergrund-`sleep`. Letzter `touch` älter als 5 min → verwaist, wird
-  weggeräumt:
+- **Run lock** `$L/run-<slug>/`: prevents two sessions from driving the same run.
+  Contains `owner` (start time + random ID; the ID is also in the log header). On every log entry, `touch` the lock.
+  Release in step 8, on abort, and on "Abort" at the approval gate. If it already exists: last
+  `touch` younger than 90 min → **stop** with "running in another session (last
+  sign of life N min ago); if it crashed: `rm -r $L/run-<slug>` and run `/factory` again".
+  Older → orphaned, take over (rewrite `owner`, note in the log).
+- **Push lock** `$L/push/`: held by exactly one run from "rebase" to "push" (step 7),
+  so that runs on `{{TARGET_BRANCH}}` do not pull the base out from under each other. The holder
+  keeps the heartbeat the whole time (also while waiting in the queue for the
+  tests). Wait **in the background** with `run_in_background`, then wait for the notification
+  — no foreground `sleep`. Last `touch` older than 5 min → orphaned, gets
+  cleaned up:
   `until mkdir "$L/push" 2>/dev/null; do find "$L" -maxdepth 1 -name push -mmin +5 -exec rmdir {} \; ; sleep 15; done`
-  Immer freigeben (`rmdir "$L/push"`), auch bei Abbruch.
-- **Warteschlange für schwere Jobs** `$L/queue/`: `{{HEAVY_JOBS}}` laufen über alle Läufe
-  hinweg **nacheinander, in Ankunftsreihenfolge** — auch die Abnahmetests, wenn
-  `{{ACCEPTANCE_RUN}}` schwer ist. Leichte Jobs (`{{TEST_ONE}}`, `{{TEST_LIGHT}}`, Vorschau,
-  Screenshots) laufen sofort. Fertig verpackt in `$K/queue.sh`, mit `run_in_background`
-  starten: `bash "$K/queue.sh" "$L" <slug>-<job> <ausgabedatei> <befehl …>` — wartet, hält den
-  Herzschlag, gibt das Ticket immer zurück, zeigt die letzten Zeilen, Exit-Code = Befehl.
-  Die Ausgabedatei liegt unter `$W/.superpowers/` (gitignored). Was das Skript tut —
-  auch Subagents halten sich daran:
+  Always release (`rmdir "$L/push"`), also on abort.
+- **Queue for heavy jobs** `$L/queue/`: `{{HEAVY_JOBS}}` run across all runs
+  **one after another, in order of arrival** — including the acceptance tests if
+  `{{ACCEPTANCE_RUN}}` is heavy. Light jobs (`{{TEST_ONE}}`, `{{TEST_LIGHT}}`, preview,
+  screenshots) run immediately. Packaged in `$K/queue.sh`, start with
+  `run_in_background`: `bash "$K/queue.sh" "$L" <slug>-<job> <output-file> <command …>` — waits, keeps the
+  heartbeat, always returns the ticket, shows the last lines, exit code = command.
+  The output file lives under `$W/.superpowers/` (gitignored). What the script does —
+  subagents follow it too:
   ```bash
   Q="$L/queue"; mkdir -p "$Q"; T=$(date +%s%N)-<slug>-<job>; touch "$Q/$T"
-  # warten im Hintergrund (run_in_background), bis das eigene Ticket vorne ist; dabei das
-  # eigene Ticket frisch halten und Tickets ohne Lebenszeichen seit 5 min (abgestürzt) entfernen
+  # wait in the background (run_in_background) until your own ticket is first; meanwhile keep
+  # your own ticket fresh and remove tickets with no sign of life for 5 min (crashed)
   until touch "$Q/$T"; find "$Q" -type f -mmin +5 -delete; [ "$(ls "$Q" | sort | head -1)" = "$T" ]; do sleep 10; done
-  # … Job ausführen, mit Herzschlag auf das Ticket (X="$Q/$T") …
-  rm -f "${Q:?}/${T:?}"   # immer, auch wenn der Job scheitert (`:?` — sonst blockt die rm-Sicherheitsprüfung)
+  # … run the job, with a heartbeat on the ticket (X="$Q/$T") …
+  rm -f "${Q:?}/${T:?}"   # always, even if the job fails (`:?` — otherwise the rm safety check blocks)
   ```
-  Die Wartezeit ins Protokoll („wartet auf Warteschlange, Platz N“). Kein Lauf hält ein
-  Ticket, während er auf die Push-Sperre wartet — erst Ticket zurückgeben, dann anstellen.
-  Ein per TaskStop beendetes `queue.sh` hinterlässt sein Ticket (der Trap greift nicht) →
-  eigenes Ticket gezielt löschen.
-- **Vorschau-Port**: erster freier aus `{{PREVIEW_PORTS}}`, siehe Schritt 5; steht im Protokoll.
-- **Git-Sperren**: alle Worktrees teilen ein `.git`. Meldet git `index.lock`/`unable to lock ref`,
-  kurz (Hintergrund-Warten wie oben) warten und den Befehl einmal wiederholen. Nie
-  `.git/*.lock` löschen.
-- Screenshots: `{{SCREENSHOT_TOOL}}` wählt seinen Debug-Port selbst; Dateinamen tragen den
-  Slug. Keinen von allen Sessions geteilten Browser-MCP benutzen.
+  Record the wait time in the log ("waiting for queue, position N"). No run holds a
+  ticket while waiting for the push lock — return the ticket first, then queue up.
+  A `queue.sh` ended via TaskStop leaves its ticket behind (the trap does not fire) →
+  delete your own ticket explicitly.
+- **Preview port**: first free one from `{{PREVIEW_PORTS}}`, see step 5; recorded in the log.
+- **Git locks**: all worktrees share one `.git`. If git reports `index.lock`/`unable to lock ref`,
+  wait briefly (background waiting as above) and retry the command once. Never
+  delete `.git/*.lock`.
+- Screenshots: `{{SCREENSHOT_TOOL}}` picks its own debug port; file names carry the
+  slug. Do not use a browser MCP shared by all sessions.
 
-## Protokoll: `$S/factory-log.md`
+## Log: `$S/factory-log.md`
 
-Die einzige Wahrheit über den Lauf — Kontext kann zusammengefasst werden, die Datei nicht.
-Kopf (einmal, in Schritt 1): Idee, Slug, `R`, `M`, `W`, `S`, `L`, Owner-ID der Lauf-Sperre,
-Basis-SHA; nach Schritt 2 `Stufe` + Grund; nach Schritt 3b das **Manifest** der
-Abnahmetests (Anzahl + `sha256` je Datei, **kein** Pfad, kein Inhalt); später `P=<Port>`.
-Der Pfad `Z` steht **nicht** im Protokoll (Implementer lesen `$S`), nur im Zeiger `{{SEALED_ROOT}}/index/<slug>` (`$L` geht an jeden Subagent, darum dort nicht).
-Danach je Ereignis eine Zeile, **sofort** nach dem Ereignis anhängen:
+The single source of truth about the run — context can get summarized, the file cannot.
+Header (once, in step 1): idea, slug, `R`, `M`, `W`, `S`, `L`, owner ID of the run lock,
+base SHA; after step 2 `Tier` + reason; after step 3b the **manifest** of the
+acceptance tests (count + `sha256` per file, **no** path, no content); later `P=<port>`.
+The path `Z` is **not** in the log (implementers read `$S`), only in the pointer `{{SEALED_ROOT}}/index/<slug>` (`$L` goes to every subagent, so not there).
+After that one line per event, appended **immediately** after the event:
 
 ```
-| Zeit | Schritt | Runde | Ergebnis | Befund-IDs offen | Commit |
+| Time | Step | Round | Result | Open finding IDs | Commit |
 ```
 
-Zähler werden aus dieser Datei gelesen, nie aus dem Gedächtnis:
-- **Test-Reparatur** (Schritt 5): höchstens 3 Versuche **je Eintritt** in Schritt 5.
-- **Abnahme-Reparatur** (Schritt 5, rote Abnahmetests): höchstens 3 Versuche **je Lauf**;
-  eine Anforderungs-ID, die nach zwei Fix-Versuchen noch rot ist → Abbruch.
-- **Review-Runden** (Schritt 6): höchstens so viele wie die Stufe erlaubt (S: 2, M/L: 5)
-  **je Lauf**, auch nach Rücksprung aus Schritt 7. Nach einer Hochstufung gilt die neue Grenze.
+Counters are read from this file, never from memory:
+- **Test repair** (step 5): at most 3 attempts **per entry** into step 5.
+- **Acceptance repair** (step 5, red acceptance tests): at most 3 attempts **per run**;
+  a requirement ID that is still red after two fix attempts → abort.
+- **Review rounds** (step 6): at most as many as the tier allows (S: 2, M/L: 5)
+  **per run**, also after jumping back from step 7. After an escalation the new limit applies.
 
-## Stufen — wie viel Aufwand der Lauf bekommt
+## Tiers — how much effort the run gets
 
-Eine reine Darstellungsänderung braucht keine 40 Minuten Review. Kriterien:
-`{{TIER_S}}` / `{{TIER_M}}` / `{{TIER_L}}` (Details `reviewers.md` §3). Der Hauptagent stuft
-in Schritt 2 vorab ein; bei M/L entscheidet danach der Abhängigkeits-Prüfer. Der Nutzer sieht
-die Stufe am Gate und kann sie dort über „Ändern“ setzen. Stufe und Grund kommen in den
-Protokollkopf.
+A pure presentation change does not need 40 minutes of review. Criteria:
+`{{TIER_S}}` / `{{TIER_M}}` / `{{TIER_L}}` (details `reviewers.md` §3). The orchestrator assigns a preliminary tier
+in step 2; for M/L the dependency checker decides afterwards. The user sees
+the tier at the approval gate and can set it there via "Change". Tier and reason go into the
+log header.
 
-| | **S** — Darstellung/Text | **M** — normal | **L** — kritischer Pfad, Rechte, Daten |
+| | **S** — presentation/text | **M** — normal | **L** — critical path, permissions, data |
 |---|---|---|---|
-| Spec | **Kurzplan** vom Hauptagenten, kein OpenSpec, kein Abhängigkeits-Prüfer | Spec-Agent + Abhängigkeits-Prüfer | Spec-Agent + Abhängigkeits-Prüfer |
-| Abnahmetests | nur wenn `S` in `{{ACCEPTANCE_TIERS}}` | versiegelt (Schritt 3b) | versiegelt (Schritt 3b), auch Randfälle und Rollen |
-| Build | **ein** Implementer für alle Tasks, kein SDD-Task-Review | SDD je Gruppe; Task-Review nur für Gruppen mit Logik (nicht für reine Tests, CSS, CI, Texte) | SDD je Gruppe, jede mit Task-Review |
-| Volle Suite | einmal in Schritt 5 | nach Gruppen, die Backend-Code ändern | nach jeder Gruppe |
-| Review-Schleife | nur UI/UX (prüft Frontend-Security mit), max. 2 Runden | laut Zuständigkeit, max. 5 | laut Zuständigkeit, max. 5 |
-| Modelle | `{{MODELS}}` | | |
+| Spec | **Short plan** by the orchestrator, no OpenSpec, no dependency checker | Spec agent + dependency checker | Spec agent + dependency checker |
+| Acceptance tests | only if `S` is in `{{ACCEPTANCE_TIERS}}` | sealed (step 3b) | sealed (step 3b), also edge cases and roles |
+| Build | **one** implementer for all tasks, no SDD task review | SDD per group; task review only for groups with logic (not for pure tests, CSS, CI, texts) | SDD per group, each with task review |
+| Full suite | once in step 5 | after groups that change backend code | after every group |
+| Review loop | UI/UX only (also checks frontend security), max. 2 rounds | per responsibilities, max. 5 | per responsibilities, max. 5 |
+| Models | `{{MODELS}}` | | |
 
-Gate, Vorschau, Screenshots, Push-Regeln und Report gelten in jeder Stufe gleich.
-**Hochstufen geht automatisch, Herunterstufen nie:** Berührt der echte Diff (Schritt 6.2,
-jede Runde) etwas, das die Kriterien einer höheren Stufe erfüllt, gilt ab dieser Runde die
-höhere Stufe samt ihren Reviewern — und, falls die neue Stufe versiegelte Abnahmetests
-verlangt und es noch keine gibt, wird Schritt 3b nachgeholt (Test-Autor bekommt Spec/Kurzplan,
-nicht den Diff). Das kommt ins Protokoll und in den Report. Eine Spec wird dabei nicht
-nachgeschrieben, der Kurzplan bleibt.
+Approval gate, preview, screenshots, push rules and report are the same in every tier.
+**Escalating happens automatically, de-escalating never:** If the real diff (step 6.2,
+every round) touches something that meets the criteria of a higher tier, the
+higher tier applies from that round on, including its reviewers — and, if the new tier requires sealed
+acceptance tests and there are none yet, step 3b is done retroactively (the test author gets the spec/short plan,
+not the diff). This goes into the log and the report. No spec is written
+retroactively; the short plan stays.
 
-## Abnahmetests — versiegelt, der bauende Agent kennt sie nicht
+## Sealed acceptance tests — the building agent does not know them
 
-Ziel: Der Agent, der die Aufgabe umsetzt, soll gegen die **Anforderungen** bauen, nicht gegen
-die Prüfung. Er kennt Spec, Tasks, Testplan-Überschriften und Schnittstellen — die konkreten
-Abnahmetests (Eingaben, erwartete Werte, Randfälle) nicht. So kann er sie weder gezielt
-erfüllen („teaching to the test“) noch abschwächen, überspringen oder löschen.
+Goal: The agent implementing the task should build against the **requirements**, not against
+the test. It knows the spec, tasks, test plan headings and interfaces — not the concrete
+acceptance tests (inputs, expected values, edge cases). That way it can neither satisfy them specifically
+("teaching to the test") nor weaken, skip or delete them.
 
-**Wer was sieht:**
+**Who sees what:**
 
-| Agent | Spec/Tasks | Abnahmetests (Ort + Inhalt) | Ergebnis der Abnahme |
+| Agent | Spec/tasks | Acceptance tests (location + content) | Acceptance result |
 |---|---|---|---|
-| Spec-Agent, Abhängigkeits-Prüfer | schreibt/liest | — (gibt es noch nicht) | — |
-| **Test-Autor** (Schritt 3b) | liest | **schreibt** | — |
-| Hauptagent (Orchestrator) | liest | **nein** — nur Manifest + Runner-Ausgabe | ja |
-| Implementer, Fix-Agent | liest | **nein** | nur gefilterte Rückmeldung (siehe unten) |
-| Reviewer | liest | **nein** | nur „grün/rot, N/M“ |
-| **Abnahme-Richter** (Schritt 5, nur bei Rot) | liest | liest | schreibt die gefilterte Rückmeldung |
+| Spec agent, dependency checker | writes/reads | — (do not exist yet) | — |
+| **Test author** (step 3b) | reads | **writes** | — |
+| Orchestrator | reads | **no** — only manifest + runner output | yes |
+| Implementer, fix agent | reads | **no** | only filtered feedback (see below) |
+| Reviewer | reads | **no** | only "green/red, N/M" |
+| **Acceptance judge** (step 5, only on red) | reads | reads | writes the filtered feedback |
 
-**Regeln:**
+**Rules:**
 
-1. **Ort:** `Z = {{SEALED_ROOT}}/<slug>-<zufall>` (`zufall` = 8 Hex-Zeichen), **außerhalb**
-   von `R`, `W` und `S` — eine Repo- oder Spec-Suche findet sie nicht. Der Pfad steht nur in
-   im Zeiger `{{SEALED_ROOT}}/index/<slug>` (nicht in `$L` — das bekommt jeder Subagent), nie im Protokoll, nie in `tasks.md`/`design.md`, nie in einem
-   Prompt an Implementer, Fix-Agent oder Reviewer.
-2. **Hauptagent bleibt blind:** Er liest die Testdateien nie (kein `Read`, kein `cat` auf `Z`),
-   bis der Lauf vorbei ist. Sonst sickern sie über seinen Kontext in jeden späteren Prompt —
-   und in jeden `fork`. Implementer, Fix-Agenten und Reviewer sind deshalb **immer frische
-   Agenten** (`general-purpose`), nie `fork`.
-3. **Implementer-Briefing** (in `context.md`): „Es gibt versiegelte Abnahmetests zu dieser
-   Spec. Du bekommst sie nicht und sollst sie nicht suchen. Bau gegen die Anforderungen und
-   Schnittstellen in der Spec, nicht gegen vermutete Tests. Lies und schreib nur in `W` und
-   `S`.“ Eigene Tests (TDD) schreibt der Implementer trotzdem — die gehören ins Repo.
-4. **Schnittstellen festlegen:** Damit Test-Autor und Implementer unabhängig voneinander
-   arbeiten können, enthält `design.md` (bzw. der Kurzplan) einen Abschnitt
-   **„Schnittstellen“**: öffentliche Funktionen/Signaturen, Routen mit Request/Response,
-   CLI-Aufrufe, UI-Selektoren/IDs, Fehlercodes. Der Implementer muss sie **genau so** bauen;
-   eine Abweichung ist ein Spec-Bruch, kein Stilfrage. Jede Anforderung bekommt eine
-   **Anforderungs-ID** (`A1`, `A2`, … in `proposal.md`/Specs).
-5. **Ausführen ohne Ablegen:** `{{ACCEPTANCE_RUN}}` lässt die Tests aus `Z` gegen `W` laufen,
-   ohne sie in `W` zu kopieren (Read-only-Mount in einen Wegwerf-Container oder Kopie von
-   `W` + `Z` in ein Temp-Verzeichnis, das danach gelöscht wird). Die Tests sind damit nie in
-   einem Commit, den ein Implementer sieht.
-   **Die Ausgabe ist Teil der Versiegelung:** Ein normaler Testlauf druckt bei Rot Quelltext
-   und Werte der Tests (Tracebacks, Assertions). `{{ACCEPTANCE_RUN}}` gibt deshalb **nur**
-   Zusammenfassung + Namen der roten Tests aus (z. B. pytest `--tb=no -rf`, Rest per `sed`
-   abgeschnitten), und die Ausgabedatei liegt in `{{SEALED_ROOT}}/out/<slug>-<n>.txt` — **nie**
-   unter `$W` (`$W/.superpowers/` lesen Implementer und Fix-Agenten). Die lange Fassung mit
-   Tracebacks erzeugt nur der Abnahme-Richter (Regel 7) selbst, ebenfalls nach
+1. **Location:** `Z = {{SEALED_ROOT}}/<slug>-<random>` (`random` = 8 hex characters), **outside**
+   `R`, `W` and `S` — a repo or spec search does not find them. The path is only in
+   the pointer `{{SEALED_ROOT}}/index/<slug>` (not in `$L` — every subagent gets that), never in the log, never in `tasks.md`/`design.md`, never in a
+   prompt to an implementer, fix agent or reviewer.
+2. **The orchestrator stays blind:** It never reads the test files (no `Read`, no `cat` on `Z`)
+   until the run is over. Otherwise they leak through its context into every later prompt —
+   and into every `fork`. Implementers, fix agents and reviewers are therefore **always fresh
+   agents** (`general-purpose`), never `fork`.
+3. **Implementer briefing** (in `context.md`): "There are sealed acceptance tests for this
+   spec. You do not get them and must not look for them. Build against the requirements and
+   interfaces in the spec, not against guessed tests. Read and write only in `W` and
+   `S`." The implementer still writes its own tests (TDD) — those belong in the repo.
+4. **Define interfaces:** So that the test author and the implementer can work independently
+   of each other, `design.md` (or the short plan) contains a section
+   **"Interfaces"**: public functions/signatures, routes with request/response,
+   CLI calls, UI selectors/IDs, error codes. The implementer must build them **exactly like that**;
+   a deviation is a spec violation, not a matter of style. Every requirement gets a
+   **requirement ID** (`A1`, `A2`, … in `proposal.md`/specs).
+5. **Run without placing:** `{{ACCEPTANCE_RUN}}` runs the tests from `Z` against `W`
+   without copying them into `W` (read-only mount into a throwaway container, or a copy of
+   `W` + `Z` into a temp directory that is deleted afterwards). The tests are thus never in
+   a commit that an implementer sees.
+   **The output is part of the seal:** A normal test run prints the tests' source code
+   and values on red (tracebacks, assertions). `{{ACCEPTANCE_RUN}}` therefore prints **only**
+   the summary + names of the red tests (e.g. pytest `--tb=no -rf`, the rest cut off via `sed`),
+   and the output file lives in `{{SEALED_ROOT}}/out/<slug>-<n>.txt` — **never**
+   under `$W` (implementers and fix agents read `$W/.superpowers/`). The long version with
+   tracebacks is produced only by the acceptance judge (rule 7) itself, also into
    `{{SEALED_ROOT}}/out/`.
-6. **Manipulationsschutz:** Vor jedem Abnahmelauf `sha256sum` über `Z` gegen das Manifest im
-   Protokoll — Abweichung = **Abbruch** („Abnahmetests verändert“). Zusätzlich prüft der
-   Hauptagent im Diff, ob der Lauf Test-Infrastruktur so ändert, dass fremde Tests anders
-   laufen (Test-Konfiguration, globale Fixtures/`conftest`, Skip-/xfail-Marker, Umgebungs­
-   erkennung „läuft gerade ein Test?“): jede solche Änderung muss eine Task in `tasks.md`
-   begründen, sonst ist sie ein `blocker` für den Security-Reviewer (er bekommt diese Liste).
-7. **Gefilterte Rückmeldung bei Rot** (`{{ACCEPTANCE_FEEDBACK}}`): Der Fix-Agent bekommt nie
-   den Testcode. Ein frischer **Abnahme-Richter** (liest Tests + Ausgabe, ändert nichts)
-   schreibt je rotem Test eine Zeile:
-   `A<n> | <Anforderung in eigenen Worten> | erwartet: <Verhalten> | beobachtet: <Verhalten>`
-   — bei `requirement` ohne konkrete Testwerte, die nicht schon in der Spec stehen; bei
-   `assertion` zusätzlich Testname, Assertion-Text und Traceback-Kopf (nie die Datei).
-   Der Richter beurteilt auch, ob der **Test** falsch ist (widerspricht Spec oder
-   Schnittstellen) — dann `TESTFEHLER A<n> | Begründung`, und der Hauptagent lässt den
-   Test-Autor genau diesen Test korrigieren (neues Manifest ins Protokoll, zählt als
-   Reparaturversuch). Ein Test wird nie gelöscht, um grün zu werden.
-8. **Nach dem Lauf:** Ist alles grün und die Review-Schleife bestanden, committet der
-   Hauptagent die Abnahmetests unter `{{ACCEPTANCE_COMMIT_DIR}}`
-   (`test(<slug>): Abnahmetests`) — ab dann sind sie normale Regressionstests. Das passiert
-   in Schritt 7 **nach** der letzten Review-Runde und vor dem Rebase; die volle Suite läuft
-   danach ohnehin noch einmal. Leerer Slot → nicht committen, `Z` bleibt für spätere Läufe
-   liegen (Pfad im Report). **Nach diesem Commit darf kein Fix-Commit
-   `{{ACCEPTANCE_COMMIT_DIR}}` berühren** (die Tests sind jetzt normale Dateien im Worktree) —
-   der Hauptagent prüft den Diff jedes späteren Fix-Commits, Verstoß = Abbruch.
-9. **Ehrliche Grenze:** Die Isolation ist Weglassen + Anweisung + gefilterte Ausgabe +
-   Nachkontrolle (Hash, Diff-Prüfung), keine harte Sandbox. Ein Agent mit Shell könnte das Dateisystem
-   durchsuchen. Wer es härter will: `Z` auf einem Pfad/Host, auf den die Session keine
-   Leserechte hat, und `{{ACCEPTANCE_RUN}}` als Dienst, der nur „bestanden/nicht bestanden“
-   zurückgibt. Im Report steht, welche Variante lief.
+6. **Tamper protection:** Before every acceptance run, `sha256sum` over `Z` against the manifest in the
+   log — mismatch = **abort** ("acceptance tests modified"). In addition the
+   orchestrator checks in the diff whether the run changes test infrastructure such that other tests
+   run differently (test configuration, global fixtures/`conftest`, skip/xfail markers, environment
+   detection "is a test running right now?"): every such change must be justified by a task in `tasks.md`,
+   otherwise it is a `blocker` for the security reviewer (it gets this list).
+7. **Filtered feedback on red** (`{{ACCEPTANCE_FEEDBACK}}`): The fix agent never gets
+   the test code. A fresh **acceptance judge** (reads tests + output, changes nothing)
+   writes one line per red test:
+   `A<n> | <requirement in its own words> | expected: <behavior> | observed: <behavior>`
+   — with `requirement` without concrete test values that are not already in the spec; with
+   `assertion` additionally test name, assertion text and traceback head (never the file).
+   The judge also assesses whether the **test** is wrong (contradicts spec or
+   interfaces) — then `TEST_ERROR A<n> | reason`, and the orchestrator has the
+   test author fix exactly that test (new manifest into the log, counts as a
+   repair attempt). A test is never deleted to get green.
+8. **After the run:** If everything is green and the review loop has passed, the
+   orchestrator commits the acceptance tests under `{{ACCEPTANCE_COMMIT_DIR}}`
+   (`test(<slug>): acceptance tests`) — from then on they are normal regression tests. This happens
+   in step 7 **after** the last review round and before the rebase; the full suite runs
+   again afterwards anyway. Empty slot → do not commit, `Z` stays in place for later runs
+   (path in the report). **After this commit no fix commit may
+   touch `{{ACCEPTANCE_COMMIT_DIR}}`** (the tests are now normal files in the worktree) —
+   the orchestrator checks the diff of every later fix commit, violation = abort.
+9. **Honest limit:** The isolation is omission + instruction + filtered output +
+   after-the-fact checks (hash, diff check), not a hard sandbox. An agent with a shell could search the
+   file system. If you want it harder: `Z` on a path/host the session has no
+   read access to, and `{{ACCEPTANCE_RUN}}` as a service that only returns "passed/failed".
+   The report states which variant ran.
 
-## Befehle
+## Commands
 
-`W` (und die anderen Pfade außer `Z`) wird **jedem** Subagent wörtlich mitgegeben — ein
-`$(pwd)` in einer Subagent-Shell zeigt auf den Session-Ordner, nicht auf den Worktree.
-Die **volle** Suite und Artefakt-Builds laufen immer über die Warteschlange
-(„Parallelbetrieb“) — auch in Schritt 4 und in Subagents.
+`W` (and the other paths except `Z`) is passed **verbatim** to **every** subagent — a
+`$(pwd)` in a subagent shell points to the session folder, not to the worktree.
+The **full** suite and artifact builds always go through the queue
+("Parallel operation") — also in step 4 and in subagents.
 
-- Volle Suite: `{{TEST_FULL}}`
-- Nur wenn `{{DEPS_FILES}}` im Diff: `{{TEST_FULL_FRESH_DEPS}}` (Installationsfehler nicht verschlucken)
-- Eine Datei (sofort): `{{TEST_ONE}}`
-- Leichte Suiten (sofort): `{{TEST_LIGHT}}`
-- Abnahme (nur Hauptagent): `{{ACCEPTANCE_RUN}}`
+- Full suite: `{{TEST_FULL}}`
+- Only if `{{DEPS_FILES}}` is in the diff: `{{TEST_FULL_FRESH_DEPS}}` (do not swallow installation errors)
+- One file (immediately): `{{TEST_ONE}}`
+- Light suites (immediately): `{{TEST_LIGHT}}`
+- Acceptance (orchestrator only): `{{ACCEPTANCE_RUN}}`
 
-`{{KNOWN_LOCAL_FAILURES}}` nicht als Fehler werten, im Report nennen.
+Do not count `{{KNOWN_LOCAL_FAILURES}}` as failures; mention them in the report.
 
-## Schritte
+## Steps
 
-1. **Intake und Preflight.**
-   - Slug aus der Idee (kebab-case, ≤ 4 Wörter).
-   - Pfade bestimmen (Tabelle oben), `factory.config.md` und `{{PROJECT_RULES}}` lesen (wird
-     bei Start außerhalb des Repos nicht automatisch geladen), `mkdir -p "$L"`, dann
-     **Lauf-Sperre** nehmen (siehe „Parallelbetrieb“). Gelingt das nicht: anhalten.
-   - **Fortsetzen:** Gibt es `$S/factory-log.md`, den Lauf ab dem letzten protokollierten
-     Schritt fortsetzen (Gate erneut zeigen, falls es noch nicht beantwortet war; `Z` aus
-     dem Zeiger `{{SEALED_ROOT}}/index/<slug>`, fehlt die Datei aber das Manifest steht im Protokoll: Schritt 3b
-     neu, neues Manifest). Gibt es Change oder Worktree **ohne** Protokoll: anhalten, nennen
-     (Slug ist von Hand oder von einem anderen Werkzeug belegt — anderen Slug vorschlagen).
-   - **Selbst starten, nicht anhalten:** Fehlt eine Laufzeit-Voraussetzung (Docker-Daemon,
-     lokale Instanz), zuerst `{{AUTOSTART}}` ausführen und im Hintergrund warten, bis sie
-     antwortet (ins Protokoll). Erst wenn das scheitert: anhalten und sagen, was fehlt.
-   - Preflight, jeder Punkt muss stimmen, sonst anhalten und sagen, was fehlt:
-     `{{PREFLIGHT}}`; `git -C "$M" ls-remote origin {{TARGET_BRANCH}}` erreichbar; `openspec`
-     und `docker` (falls genutzt) vorhanden; kein eigener alter Container `factory-<slug>-*`
-     (sonst entfernen — er gehört zu diesem Slug). Offene Änderungen in `M` und Container
-     anderer Läufe sind **kein** Hindernis — nur im Report nennen, dass die
-     Vorher-Screenshots den Stand von `M` zeigen.
-   - **Externe Voraussetzungen:** Nennt die Idee ein System außerhalb des Repos (URL, Dienst,
-     Konto, Token, Server-Konfiguration), jeden Zugang mit `curl -sI` prüfen — erst der
-     Statuscode zählt, nicht eine Vermutung. Das Ergebnis kommt als `Voraussetzung:` in den
-     Protokollkopf. Ist eine Voraussetzung nicht erfüllt (4xx/5xx, nicht erreichbar, Zugang
-     fehlt), wird nicht angehalten. Sie wird aber am Gate die erste Weiche (Schritt 3).
-     (Lehre: ein Lauf hat 3 h gegen einen 401 gebaut.)
+1. **Intake and preflight.**
+   - Slug from the idea (kebab-case, ≤ 4 words).
+   - Determine paths (table above), read `factory.config.md` and `{{PROJECT_RULES}}` (not
+     loaded automatically when starting outside the repo), `mkdir -p "$L"`, then
+     take the **run lock** (see "Parallel operation"). If that fails: stop.
+   - **Resume:** If `$S/factory-log.md` exists, resume the run from the last logged
+     step (show the approval gate again if it was not answered yet; `Z` from
+     the pointer `{{SEALED_ROOT}}/index/<slug>`; if the file is missing but the manifest is in the log: redo step 3b,
+     new manifest). If a change or worktree exists **without** a log: stop, name it
+     (the slug is taken by hand or by another tool — suggest a different slug).
+   - **Start it yourself, don't stop:** If a runtime prerequisite is missing (Docker daemon,
+     local instance), first run `{{AUTOSTART}}` and wait in the background until it
+     responds (into the log). Only if that fails: stop and say what is missing.
+   - Preflight, every item must hold, otherwise stop and say what is missing:
+     `{{PREFLIGHT}}`; `git -C "$M" ls-remote origin {{TARGET_BRANCH}}` reachable; `openspec`
+     and `docker` (if used) present; no old container of your own `factory-<slug>-*`
+     (otherwise remove it — it belongs to this slug). Uncommitted changes in `M` and containers
+     of other runs are **not** an obstacle — just mention in the report that the
+     before screenshots show the state of `M`.
+   - **External prerequisites:** If the idea names a system outside the repo (URL, service,
+     account, token, server configuration), check every access with `curl -sI` — only the
+     status code counts, not a guess. The result goes into the log header as `Prerequisite:`.
+     If a prerequisite is not met (4xx/5xx, unreachable, access
+     missing), do not stop. But it becomes the first decision point at the approval gate (step 3).
+     (Lesson: a run built for 3 h against a 401.)
    - `git -C "$M" fetch origin && git -C "$M" worktree add "$W" -b {{FEATURE_BRANCH}} origin/{{TARGET_BRANCH}}`,
-     Protokoll anlegen.
+     create the log.
 
-2. **Spec** — in Subagents, damit der Hauptkontext klein bleibt.
-   - **Vorab-Einstufung** (Hauptagent, ein paar Greps): Erfüllt die Idee klar `{{TIER_S}}`,
-     gibt es keine Spec, sondern einen **Kurzplan**. Im Zweifel nicht S.
-     Der Hauptagent schreibt `$S/tasks.md` selbst, ohne OpenSpec und ohne `validate`:
-     Ziel (1 Satz), Anforderungen mit IDs, Schnittstellen (falls es welche gibt), Tasks mit
-     echten Dateien (vorher Quelltext-Guards in den Tests zur Stelle suchen), Testplan (2–3
-     Zeilen, Ansichten in `{{SCREEN_WIDTHS}}`), höchstens 3 Weichen (siehe Gate). Danach
-     direkt Schritt 3, der Rest von Schritt 2 entfällt.
-   - **Spec-Agent** (`general-purpose`): führt im Ordner `R` den Skill `openspec-propose`
-     aus, Change-Name = Slug; bekommt `R`, `M`, `S` und den Pfad `{{PROJECT_RULES}}`.
-     Vorgaben im Prompt: **keine Rückfragen** — jede offene Frage wird Annahme mit Default;
-     die Schlussempfehlung „/opsx:apply“ ignorieren. Pflichtabschnitte:
-     - **Annahmen** in `proposal.md`;
-     - **Anforderungen mit IDs** (`A1 …`), jede prüfbar formuliert (Eingabe → Verhalten);
-     - **Schnittstellen** in `design.md` (siehe „Abnahmetests“, Regel 4);
-     - **Testplan** in `design.md`: Unit-Tests; bei zustandsbehafteten oder dialogartigen
-       Abläufen Szenario-Tests über mehrere Schritte; bei Frontend die Ansichten für den
-       Browser (`{{SCREEN_WIDTHS}}`); bei `{{REVIEW_RUNTIME}}`-Pfaden die Harness-Szenarien
-       (vorhandene aus `$T` nennen, was fehlt als neues Szenario mit Erwartung beschreiben —
-       es wird in Schritt 4 in `{{HARNESS_SCENARIO_FILE}}` angelegt, Namen mit Präfix
+2. **Spec** — in subagents, so the main context stays small.
+   - **Preliminary tiering** (orchestrator, a few greps): If the idea clearly meets `{{TIER_S}}`,
+     there is no spec but a **short plan**. When in doubt, not S.
+     The orchestrator writes `$S/tasks.md` itself, without OpenSpec and without `validate`:
+     goal (1 sentence), requirements with IDs, interfaces (if there are any), tasks with
+     real files (first look for source guards in the tests for that spot), test plan (2–3
+     lines, views in `{{SCREEN_WIDTHS}}`), at most 3 decision points (see approval gate). Then
+     go directly to step 3; the rest of step 2 is skipped.
+   - **Spec agent** (`general-purpose`): runs the skill `openspec-propose` in folder `R`,
+     change name = slug; gets `R`, `M`, `S` and the path `{{PROJECT_RULES}}`.
+     Requirements in the prompt: **no questions to the user** — every open question becomes an assumption with a default;
+     ignore the final recommendation "/opsx:apply". Required sections:
+     - **Assumptions** in `proposal.md`;
+     - **Requirements with IDs** (`A1 …`), each phrased testably (input → behavior);
+     - **Interfaces** in `design.md` (see "Sealed acceptance tests", rule 4);
+     - **Test plan** in `design.md`: unit tests; for stateful or dialog-like
+       flows, scenario tests over several steps; for frontend, the views for the
+       browser (`{{SCREEN_WIDTHS}}`); for `{{REVIEW_RUNTIME}}` paths, the harness scenarios
+       (name existing ones from `$T`, describe what is missing as a new scenario with expectation —
+       it is created in step 4 in `{{HARNESS_SCENARIO_FILE}}`, names with prefix
        `<slug>_`).
-     Der Testplan nennt **Testarten und Bereiche**, keine konkreten Abnahme-Testfälle — die
-     schreibt der Test-Autor in Schritt 3b versiegelt. Tasks nennen echte Dateien (Code vorher
-     mit Grep lesen). `openspec validate <slug>` grün. Die Spec wächst mit der Änderung: eine
-     reine Darstellungsänderung bekommt wenige Tasks und einen kurzen Testplan, keinen Roman.
-     Rückgabe nur: Ziel (1 Satz), Anforderungs-IDs, Tasks, Testplan, `VORAUSSETZUNGEN` (was
-     außerhalb des Codes da sein muss) und **`WEICHEN`**: höchstens 3 Annahmen, bei denen
-     eine andere Antwort das sichtbare Ergebnis, die Architektur oder den Aufwand deutlich
-     ändert. Je Weiche: Frage, 2–3 Optionen (Default zuerst), bei Optik je Option eine
-     ASCII-Skizze (≤ 12 Zeilen). Die übrigen Annahmen stehen nur in `proposal.md`.
-   - **Abhängigkeits-Prüfer** (`reviewers.md` §3, Modus „vor dem Build“) danach. Seine
-     `TASKS_ADD`/`ANNAHMEN_ADD` trägt der Hauptagent in `tasks.md`/`proposal.md` ein
-     (markiert „ergänzt: Abhängigkeiten“), dann `openspec validate <slug>` erneut. Seine
-     `STUFE` und `GRUND` kommen in den Protokollkopf. `WEICHEN_ADD` und
-     `VORAUSSETZUNGEN_ADD` legt er zu denen des Spec-Agenten. Sind es mehr als 3 Weichen,
-     behält er die 3 mit der größten Wirkung, der Rest wird Annahme mit Default.
+     The test plan names **test types and areas**, no concrete acceptance test cases — those
+     are written sealed by the test author in step 3b. Tasks name real files (read the code
+     with grep first). `openspec validate <slug>` green. The spec grows with the change: a
+     pure presentation change gets few tasks and a short test plan, not a novel.
+     Return only: goal (1 sentence), requirement IDs, tasks, test plan, `PREREQUISITES` (what
+     must exist outside the code) and **`DECISION_POINTS`**: at most 3 assumptions where
+     a different answer clearly changes the visible result, the architecture or the effort.
+     Per decision point: question, 2–3 options (default first), for visuals an
+     ASCII sketch per option (≤ 12 lines). The remaining assumptions are only in `proposal.md`.
+   - **Dependency checker** (`reviewers.md` §3, mode "before the build") afterwards. Its
+     `TASKS_ADD`/`ASSUMPTIONS_ADD` are entered by the orchestrator into `tasks.md`/`proposal.md`
+     (marked "added: dependencies"), then `openspec validate <slug>` again. Its
+     `TIER` and `REASON` go into the log header. It adds `DECISION_POINTS_ADD` and
+     `PREREQUISITES_ADD` to those of the spec agent. If there are more than 3 decision points,
+     it keeps the 3 with the greatest impact; the rest become assumptions with defaults.
 
-3. **Gate.** Eine Liste mit 20 Annahmen wird in einer Minute abgenickt, und die echten
-   Designfragen kommen dann erst nach dem Push. Darum fragt das Gate die Weichen, statt
-   Annahmen aufzuzählen.
-   - Kurzfassung im Terminal, höchstens 10 Zeilen:
-     - **unerfüllte Voraussetzungen zuerst und fett**,
-     - Ziel,
-     - Stufe mit Grund und was sie bedeutet (z. B. „S: ein Implementer, nur UI-Review,
-       {{TIER_MINUTES}}“), und ob versiegelte Abnahmetests laufen,
-     - Task-Gruppen als Überschriften mit Anzahl,
-     - „N weitere Annahmen mit Default in `proposal.md`“. Diese nicht aufzählen.
-   - Dann **ein** `AskUserQuestion` mit bis zu 4 Fragen:
-     - bis zu 3 Weichen (Default als erste Option, „(Recommended)“), bei Optik mit `preview`
-       = ASCII-Skizze je Option;
-     - zuletzt **Bauen** / **Ändern** / **Abbrechen**.
-   - Eine **unerfüllte Voraussetzung** ist immer die erste Weiche:
-     - „Erst klären: Lauf anhalten (Recommended)“, wenn der Kern der Idee davon abhängt.
-       Das zählt wie Abbrechen.
-     - „Trotzdem bauen, nur gegen eine Attrappe getestet“. Das steht dann im Report unter
-       „offen“.
-   - Antworten ins Protokoll.
-   - Weicht eine Weiche vom Default ab und lautet die letzte Antwort „Bauen“: die Antwort per
-     `openspec-update-change` (S: direkt in `tasks.md`) einarbeiten und **ohne** erneutes
-     Gate bauen.
-   - Ändern → Notiz per `openspec-update-change` einarbeiten, Gate erneut. Will der Nutzer
-     nur eine andere Stufe, die Stufe im Protokoll ändern (keine Spec-Änderung) und erneut
-     fragen. Wird dabei aus S eine höhere Stufe, Schritt 2 ab dem Spec-Agent nachholen.
-   - Abbrechen → Worktree, Change und Protokoll bleiben, Lauf-Sperre freigeben, Pfade nennen, Ende.
+3. **Approval gate.** A list of 20 assumptions gets nodded through in a minute, and the real
+   design questions only come up after the push. That is why the approval gate asks about the decision points instead of
+   listing assumptions.
+   - Summary in the terminal, at most 10 lines:
+     - **unmet prerequisites first and in bold**,
+     - goal,
+     - tier with reason and what it means (e.g. "S: one implementer, UI review only,
+       {{TIER_MINUTES}}"), and whether sealed acceptance tests run,
+     - task groups as headings with counts,
+     - "N more assumptions with defaults in `proposal.md`". Do not list them.
+   - Then **one** `AskUserQuestion` with up to 4 questions:
+     - up to 3 decision points (default as first option, "(Recommended)"), for visuals with `preview`
+       = ASCII sketch per option;
+     - last **Build** / **Change** / **Abort**.
+   - An **unmet prerequisite** is always the first decision point:
+     - "Clarify first: stop the run (Recommended)", if the core of the idea depends on it.
+       That counts as Abort.
+     - "Build anyway, tested only against a mock". That then appears in the report under
+       "open".
+   - Answers into the log.
+   - If a decision point deviates from the default and the last answer is "Build": work the answer in via
+     `openspec-update-change` (S: directly in `tasks.md`) and build **without** another
+     approval gate.
+   - Change → work the note in via `openspec-update-change`, approval gate again. If the user
+     only wants a different tier, change the tier in the log (no spec change) and ask
+     again. If S becomes a higher tier in the process, redo step 2 from the spec agent on.
+   - Abort → worktree, change and log stay, release the run lock, name the paths, end.
 
-3b. **Abnahmetests schreiben (versiegelt)** — nur in Stufen laut `{{ACCEPTANCE_TIERS}}`,
-   startet direkt nach „Bauen“ und läuft **parallel** zu Schritt 4.
-   - `Z` anlegen (`mkdir -p`, Zufallssuffix), Pfad in den Zeiger `{{SEALED_ROOT}}/index/<slug>`.
-   - **Test-Autor** (frischer `general-purpose`, nie `fork`; Modell wie Reviewer der Stufe)
-     bekommt: `S` (Spec nach dem Gate), `M` (Code-Stand **vor** der Änderung, nur lesen),
-     `Z`, `{{ACCEPTANCE_STYLE}}`, `{{ACCEPTANCE_RUN}}`, `{{PROJECT_RULES}}`. **Nicht** `W` —
-     der Autor soll gegen die Spec schreiben, nicht gegen den entstehenden Code.
-   - Auftrag:
-     - je Anforderungs-ID mindestens ein Test, benannt nach der ID (`test_A3_…`), damit
-       ein roter Test ohne Quelltext verständlich ist;
-     - **zusätzlich Randfälle, die in `tasks.md` nicht aufgezählt sind**: Leer-/Grenzwerte,
-       ungültige Eingaben, Rechte/Rollen (`{{SECURITY_ROLES}}`) bei L, Fehlerpfade,
-       Wiederholung/Idempotenz, Lang-Text und Escaping bei Kundendaten;
-     - nur gegen die Schnittstellen aus `design.md` — keine Annahmen über interne
-       Hilfsfunktionen, Dateinamen oder Implementierungsdetails;
-     - nichts in `W`, `S` oder `M` schreiben; kein Commit;
-     - Tests für **neue** Schnittstellen in eigene Dateien, getrennt von Tests für
-       Bestehendes (ein Import einer noch nicht vorhandenen Schnittstelle macht sonst die
-       ganze Datei zum Sammelfehler);
-     - einmal gegen den **Basis-Stand** (`M`) laufen lassen: die Tests für neues Verhalten
-       müssen dort **rot** sein (sonst prüfen sie nichts), Tests für Bestehendes grün.
-   - Rückgabe **nur**: Anzahl Tests je Anforderungs-ID, Liste der Randfall-Kategorien,
-     Ergebnis gegen Basis (rot/grün je ID), `sha256sum` je Datei. **Kein Testcode, keine
-     Testwerte.** Das kommt als Manifest ins Protokoll.
-   - Der Hauptagent liest die Dateien in `Z` nicht.
+3b. **Write acceptance tests (sealed)** — only in tiers per `{{ACCEPTANCE_TIERS}}`,
+   starts right after "Build" and runs **in parallel** with step 4.
+   - Create `Z` (`mkdir -p`, random suffix), path into the pointer `{{SEALED_ROOT}}/index/<slug>`.
+   - **Test author** (fresh `general-purpose`, never `fork`; model like the tier's reviewers)
+     gets: `S` (spec after the approval gate), `M` (code state **before** the change, read-only),
+     `Z`, `{{ACCEPTANCE_STYLE}}`, `{{ACCEPTANCE_RUN}}`, `{{PROJECT_RULES}}`. **Not** `W` —
+     the author should write against the spec, not against the code being built.
+   - Assignment:
+     - at least one test per requirement ID, named after the ID (`test_A3_…`), so that
+       a red test is understandable without source code;
+     - **additionally edge cases that are not listed in `tasks.md`**: empty/boundary values,
+       invalid inputs, permissions/roles (`{{SECURITY_ROLES}}`) for L, error paths,
+       repetition/idempotency, long text and escaping for customer data;
+     - only against the interfaces from `design.md` — no assumptions about internal
+       helper functions, file names or implementation details;
+     - write nothing in `W`, `S` or `M`; no commit;
+     - tests for **new** interfaces in separate files, apart from tests for
+       existing behavior (otherwise an import of a not-yet-existing interface turns the
+       whole file into a collection error);
+     - run once against the **base state** (`M`): the tests for new behavior
+       must be **red** there (otherwise they test nothing), tests for existing behavior green.
+   - Return **only**: number of tests per requirement ID, list of edge-case categories,
+     result against base (red/green per ID), `sha256sum` per file. **No test code, no
+     test values.** That goes into the log as the manifest.
+   - The orchestrator does not read the files in `Z`.
 
 4. **Build.**
-   - Zuerst `git -C "$W" fetch origin && git -C "$W" rebase origin/{{TARGET_BRANCH}}`: Spec und
-     Gate dauern oft 20+ min, in der Zeit landen fremde Commits (ohne eigene Commits ein
-     reiner Fast-Forward). Neue Basis ins Protokoll und in `tasks.md`/`design.md`, falls dort
-     ein SHA steht.
-   - Skill `superpowers:subagent-driven-development` mit diesen Vorgaben:
-     Plan = `$S/tasks.md`; Worktree **existiert schon** (`W`, kein neuer, kein
-     `using-git-worktrees`); Abhaken in `$S/` und Docker-Testläufe sind erlaubt und **kein**
-     Stoppgrund; Implementer committen je Task (`{{COMMIT_STYLE}}`). **Entfallen:** das
-     Final-Review von SDD und `superpowers:finishing-a-development-branch` — das übernehmen
-     Schritt 6 und 7.
-   - **Stufe S:** kein SDD — ein Implementer bekommt alle Gruppen auf einmal, committet je
-     Task, kein Task-Review (das UI-Review in Schritt 6 ist die Prüfung). Weiter mit Schritt 5.
-   - **Stufe M/L:** ein Implementer und — laut Stufe — ein Task-Review je Task-Gruppe
-     (`## N.` in `tasks.md`), nicht je Einzeltask. SDDs `task-brief` sucht
-     „Task N“-Überschriften und findet in OpenSpec-Tasks nichts — den Brief je Gruppe selbst
-     schneiden:
+   - First `git -C "$W" fetch origin && git -C "$W" rebase origin/{{TARGET_BRANCH}}`: spec and
+     approval gate often take 20+ min, in that time other people's commits land (without own commits a
+     pure fast-forward). New base into the log and into `tasks.md`/`design.md`, if a SHA
+     appears there.
+   - Skill `superpowers:subagent-driven-development` with these requirements:
+     plan = `$S/tasks.md`; the worktree **already exists** (`W`, no new one, no
+     `using-git-worktrees`); ticking off in `$S/` and Docker test runs are allowed and **not** a
+     reason to stop; implementers commit per task (`{{COMMIT_STYLE}}`). **Dropped:** the
+     SDD final review and `superpowers:finishing-a-development-branch` — steps 6 and 7
+     take care of that.
+   - **Tier S:** no SDD — one implementer gets all groups at once, commits per
+     task, no task review (the UI review in step 6 is the check). Continue with step 5.
+   - **Tier M/L:** one implementer and — per tier — one task review per task group
+     (`## N.` in `tasks.md`), not per individual task. SDD's `task-brief` looks for
+     "Task N" headings and finds nothing in OpenSpec tasks — cut the brief per group
+     yourself:
      `awk -v n=N '/^## /{in_=($0 ~ "^## " n "[.]")} in_' "$S/tasks.md" > <workspace>/group-N-brief.md`.
-     Was alle Subagents brauchen (Pfade außer `Z`, Befehle oben mit eingesetztem `W`,
-     Commit-Stil, Pfad zu `{{PROJECT_RULES}}`, „volle Suite nur über `queue.sh`“, **der
-     Abnahmetest-Hinweis aus Regel 3**) **einmal** als `<workspace>/context.md` schreiben und
-     jedem Prompt nur den Pfad mitgeben. `<workspace>` = Ausgabe von SDDs `sdd-workspace`
-     (liegt in `$W/.superpowers/`, gitignored).
-   - Volle Suite nach Gruppen laut Stufe (L: jede, M: die Backend-Code ändern, S: keine).
-     Ergebnis ins Protokoll.
-   - Neue Harness-Szenarien aus dem Testplan legt der Implementer in
-     `{{HARNESS_SCENARIO_FILE}}` an (liegt außerhalb des Repos, wird nicht committet); ins
-     Protokoll.
+     Write what all subagents need (paths except `Z`, commands above with `W` filled in,
+     commit style, path to `{{PROJECT_RULES}}`, "full suite only via `queue.sh`", **the
+     acceptance test note from rule 3**) **once** as `<workspace>/context.md` and
+     pass only the path in each prompt. `<workspace>` = output of SDD's `sdd-workspace`
+     (lives in `$W/.superpowers/`, gitignored).
+   - Full suite after groups per tier (L: each, M: those that change backend code, S: none).
+     Result into the log.
+   - New harness scenarios from the test plan are created by the implementer in
+     `{{HARNESS_SCENARIO_FILE}}` (lives outside the repo, is not committed); into the
+     log.
 
-5. **Verify** (bei jedem Eintritt neu, 3 Reparaturversuche).
-   - Volle Suite (über die Warteschlange) und leichte Suiten. Rot → Ursache beheben
-     (`superpowers:systematic-debugging`), committen, neu testen. Nach 3 Versuchen:
-     **Abbruch** (siehe unten).
-   - **Abnahmetests** (wenn es `Z` gibt; wartet, bis Schritt 3b fertig ist): Manifest prüfen
-     (Regel 6), dann `{{ACCEPTANCE_RUN}}` (schwer → über die Warteschlange). Der Hauptagent
-     liest nur Exit-Code und Zusammenfassung (bestanden/gesamt, IDs der roten Tests).
-     - Grün → ins Protokoll („Abnahme N/N, Manifest ok“).
-     - Rot → **Abnahme-Richter** (frischer Agent, Regel 7; bekommt `Z`, lässt die roten Tests
-       selbst mit vollem Traceback nach `{{SEALED_ROOT}}/out/` laufen) schreibt die gefilterte
-       Rückmeldung nach `$S/acceptance-feedback-<n>.md`; der Hauptagent prüft vor der
-       Weitergabe nur, dass darin kein Testcode steht (keine `def test`/`assert`/`expect(`-
-       Zeilen). Ein **frischer** Fix-Agent bekommt diese Datei + Spec + `W` (Verhalten zuerst
-       als eigener Test im Repo, dann Fix, ein Commit `fix(<bereich>): Abnahme A<n>`).
-       Danach Schritt 5 erneut. Zähler „Abnahme-Reparatur“ (Protokoll).
-       `TESTFEHLER` → Test-Autor korrigiert genau diesen Test (Regel 7).
-   - **Laufzeit-Pfade im Diff** (`{{REVIEW_RUNTIME}}`) **und** seit dem letzten Build
-     geändert (SHA im Protokoll): einmal bauen (über die Warteschlange),
-     `{{ARTIFACT_BUILD}}`. Beim ersten Mal zusätzlich die **Baseline**:
-     `git -C "$M" worktree add "$W-base" <Basis-SHA>`, `{{TEST_FULL_LIST}}` dort, Pass/Fail-Liste
-     nach `$S/baseline-tests.txt`.
-   - **Szenario-Harness** (nur wenn `{{HARNESS_DIR}}` gesetzt und Laufzeit-Pfade im Diff,
-     nach dem Build). `B` = erste 7 Zeichen des Basis-SHA.
-     1. Basis-Artefakt `base-$B` nur bauen, wenn es noch nicht existiert (andere Läufe auf
-        derselben Basis teilen es), über die Warteschlange: `{{ARTIFACT_BUILD_BASE}}`.
-     2. Szenarien = `{{HARNESS_STD_SCENARIOS}}` plus die aus dem Testplan. Je Artefakt
-        mindestens 2 Läufe, über die Warteschlange (`{{HARNESS_RUN}}`). Für `base-$B` nur
-        Szenarien, für die es noch keine 2 Ergebnisse mit diesem Artefakt gibt.
-     3. Vergleich `{{HARNESS_COMPARE}}`, Tabelle und Kurzfassung ins Protokoll.
-        - **Nachmessen:** Zwei Läufe trennen Streuung nicht von Rückschritt. Ein gemeldetes
-          Szenario läuft deshalb mit dem Lauf-Artefakt auf 6 Läufe auf, erst dann wird
-          verglichen.
-        - **Rückschritt nach dem Nachmessen zählt wie ein roter Test.**
-        - Ebenso rot: ein Testplan-Szenario, das mit dem Lauf-Artefakt nicht 2/2 ok ist.
-        - Reparatur wie oben, danach neu bauen und nur das Lauf-Artefakt erneut laufen lassen.
-     4. `{{HARNESS_NOTES}}` — fehlt ein Ergebnis, zuerst die Logs der Harness lesen, bevor man
-        am Code zweifelt.
-   - **`{{PREVIEW_TRIGGER}}` im Diff:** Vorschau-Instanz (einmal starten, Hot-Reload lädt
-     Änderungen selbst): `{{PREVIEW_START}}`. `P` = erster freier Port aus
-     `{{PREVIEW_PORTS}}` (`curl -s 127.0.0.1:$P` antwortet nicht). Scheitert der Start am
-     Port (ein anderer Lauf war schneller), Container entfernen und nächsten Port nehmen.
-     `P` ins Protokoll. Ansprechen immer über `http://127.0.0.1:$P` (eigener Cookie-Speicher,
-     die gemeinsame Instanz bleibt angemeldet). `curl -sI http://127.0.0.1:$P/` muss antworten.
-   - **Testdaten der Vorschau:** `{{PREVIEW_SEED}}` — nur synthetische Daten: Normalfall,
-     Leerzustand, Lang-Text mit `<img onerror>`. IDs der Testdaten ins Protokoll — die
-     Reviewer brauchen sie. Vorher-Screenshots der gemeinsamen Instanz zeigen echte Daten,
-     Nachher synthetische; das im Report sagen.
+5. **Verify** (fresh on every entry, 3 repair attempts).
+   - Full suite (via the queue) and light suites. Red → fix the cause
+     (`superpowers:systematic-debugging`), commit, test again. After 3 attempts:
+     **abort** (see below).
+   - **Acceptance tests** (if `Z` exists; waits until step 3b is done): check the manifest
+     (rule 6), then `{{ACCEPTANCE_RUN}}` (heavy → via the queue). The orchestrator
+     reads only the exit code and summary (passed/total, IDs of the red tests).
+     - Green → into the log ("acceptance N/N, manifest ok").
+     - Red → **acceptance judge** (fresh agent, rule 7; gets `Z`, runs the red tests
+       itself with full traceback into `{{SEALED_ROOT}}/out/`) writes the filtered
+       feedback to `$S/acceptance-feedback-<n>.md`; before passing it on, the orchestrator only
+       checks that it contains no test code (no `def test`/`assert`/`expect(`
+       lines). A **fresh** fix agent gets this file + spec + `W` (behavior first
+       as its own test in the repo, then the fix, one commit `fix(<area>): acceptance A<n>`).
+       Then step 5 again. Counter "acceptance repair" (log).
+       `TEST_ERROR` → the test author fixes exactly that test (rule 7).
+   - **Runtime paths in the diff** (`{{REVIEW_RUNTIME}}`) **and** changed since the last build
+     (SHA in the log): build once (via the queue),
+     `{{ARTIFACT_BUILD}}`. The first time, additionally the **baseline**:
+     `git -C "$M" worktree add "$W-base" <base-SHA>`, `{{TEST_FULL_LIST}}` there, pass/fail list
+     to `$S/baseline-tests.txt`.
+   - **Scenario harness** (only if `{{HARNESS_DIR}}` is set and runtime paths are in the diff,
+     after the build). `B` = first 7 characters of the base SHA.
+     1. Build the base artifact `base-$B` only if it does not exist yet (other runs on
+        the same base share it), via the queue: `{{ARTIFACT_BUILD_BASE}}`.
+     2. Scenarios = `{{HARNESS_STD_SCENARIOS}}` plus those from the test plan. Per artifact
+        at least 2 runs, via the queue (`{{HARNESS_RUN}}`). For `base-$B` only
+        scenarios that do not yet have 2 results with this artifact.
+     3. Comparison `{{HARNESS_COMPARE}}`, table and summary into the log.
+        - **Re-measure:** Two runs do not separate noise from regression. A flagged
+          scenario is therefore brought up to 6 runs with the run's artifact, only then is it
+          compared.
+        - **A regression after re-measuring counts like a red test.**
+        - Also red: a test plan scenario that is not 2/2 ok with the run's artifact.
+        - Repair as above, then rebuild and rerun only the run's artifact.
+     4. `{{HARNESS_NOTES}}` — if a result is missing, read the harness logs first before
+        doubting the code.
+   - **`{{PREVIEW_TRIGGER}}` in the diff:** preview instance (start once, hot reload picks up
+     changes itself): `{{PREVIEW_START}}`. `P` = first free port from
+     `{{PREVIEW_PORTS}}` (`curl -s 127.0.0.1:$P` does not respond). If the start fails on the
+     port (another run was faster), remove the container and take the next port.
+     `P` into the log. Always address it via `http://127.0.0.1:$P` (own cookie store,
+     the shared instance stays logged in). `curl -sI http://127.0.0.1:$P/` must respond.
+   - **Preview test data:** `{{PREVIEW_SEED}}` — synthetic data only: normal case,
+     empty state, long text with `<img onerror>`. IDs of the test data into the log — the
+     reviewers need them. Before screenshots of the shared instance show real data,
+     after screenshots synthetic data; say so in the report.
 
-6. **Review-Schleife** — bis **alle** zuständigen Reviewer `APPROVED` melden.
-   Prüflisten, Zuständigkeit, Antwortformat und Befund-IDs: `reviewers.md`.
-   1. **Vollständigkeit** (Hauptagent, jede Runde): keine offene `- [ ]` in `tasks.md`, und
-      jede Task hat einen Commit, der sie umsetzt. Lücke → zurück zu Schritt 4 nur für diese
-      Tasks.
-   2. Zuständigkeit aus `git -C "$W" diff --name-only origin/{{TARGET_BRANCH}}...HEAD`
-      bestimmen (jede Runde neu), dabei die Stufe gegen den echten Diff prüfen und, wenn
-      nötig, hochstufen („Stufen“). Bei S nur der UI/UX-Reviewer.
-   3. Zuständige Reviewer **parallel** starten (ein Agent-Aufruf je Reviewer in *einer*
-      Nachricht, `general-purpose`, frisch). Jeder bekommt `W`, `L`, `P`, Slug, Spec-Pfad, die
-      Befehle oben (ohne `{{ACCEPTANCE_RUN}}`), seine offenen Befunde der Vorrunde (mit IDs),
-      seine Prüfliste, den Diff als Datei
-      (`git -C "$W" diff origin/{{TARGET_BRANCH}}...HEAD > "$S/review-r<N>.diff"`), das
-      Abnahme-Ergebnis als Zahl („Abnahme 14/14 grün“) und — ab Runde 2 — den Commit-Bereich
-      der letzten Fix-Runde. Der Security-Reviewer bekommt zusätzlich die Liste geänderter
-      Test-Infrastruktur (Regel 6). Die volle Suite läuft beim Hauptagenten parallel zur
-      Runde; Reviewer lassen sie nicht noch einmal laufen, sondern bekommen das Ergebnis.
-   4. Ergebnis ins Protokoll. Alle `APPROVED` → Schritt 7.
-   5. Sonst **ein** frischer Fix-Agent mit allen `blocker`/`major`-Befunden: Verhalten zuerst
-      als Test, dann Fix, **ein Commit je Runde** (`fix(<bereich>): Befunde aus Review-Runde N`).
-      Widersprechen sich Befunde, gilt `{{CONFLICT_ORDER}}`. Dann Schritt 5 (inkl.
-      Abnahmetests), dann nächste Runde.
-   6. **Abbruch**, wenn: die Rundengrenze der Stufe erreicht ist, oder eine Befund-ID nach
-      einem Fix-Versuch in der nächsten Runde wieder offen ist und auch der zweite
-      Fix-Versuch sie nicht schließt, oder ein Fix eine Nutzerentscheidung aus
-      `{{PROJECT_RULES}}` umwerfen müsste. `minor`-Befunde blockieren nie, sie kommen in den
-      Report.
+6. **Review loop** — until **all** responsible reviewers report `APPROVED`.
+   Checklists, responsibilities, response format and finding IDs: `reviewers.md`.
+   1. **Completeness** (orchestrator, every round): no open `- [ ]` in `tasks.md`, and
+      every task has a commit that implements it. Gap → back to step 4 only for those
+      tasks.
+   2. Determine responsibilities from `git -C "$W" diff --name-only origin/{{TARGET_BRANCH}}...HEAD`
+      (anew every round), checking the tier against the real diff and escalating if
+      necessary ("Tiers"). For S only the UI/UX reviewer.
+   3. Start the responsible reviewers **in parallel** (one Agent call per reviewer in *one*
+      message, `general-purpose`, fresh). Each gets `W`, `L`, `P`, slug, spec path, the
+      commands above (without `{{ACCEPTANCE_RUN}}`), its open findings from the previous round (with IDs),
+      its checklist, the diff as a file
+      (`git -C "$W" diff origin/{{TARGET_BRANCH}}...HEAD > "$S/review-r<N>.diff"`), the
+      acceptance result as a number ("acceptance 14/14 green") and — from round 2 on — the commit range
+      of the last fix round. The security reviewer additionally gets the list of changed
+      test infrastructure (rule 6). The full suite runs at the orchestrator in parallel with the
+      round; reviewers do not run it again but get the result.
+   4. Result into the log. All `APPROVED` → step 7.
+   5. Otherwise **one** fresh fix agent with all `blocker`/`major` findings: behavior first
+      as a test, then the fix, **one commit per round** (`fix(<area>): findings from review round N`).
+      If findings contradict each other, `{{CONFLICT_ORDER}}` applies. Then step 5 (incl.
+      acceptance tests), then the next round.
+   6. **Abort** if: the tier's round limit is reached, or a finding ID is open again in the next round after
+      a fix attempt and the second
+      fix attempt does not close it either, or a fix would have to overturn a user decision from
+      `{{PROJECT_RULES}}`. `minor` findings never block; they go into the
+      report.
 
-7. **Ship** — alles von „rebase“ bis „push“ unter der **Push-Sperre**.
-   - Abnahmetests übernehmen (Regel 8): nach `{{ACCEPTANCE_COMMIT_DIR}}` kopieren,
-     `test(<slug>): Abnahmetests` committen (entfällt bei leerem Slot).
-   - `git -C "$W" status --porcelain` leer (sonst committen).
-   - Push-Sperre nehmen (im Hintergrund warten, siehe „Parallelbetrieb“), ins Protokoll.
-   - `git -C "$W" fetch origin && git -C "$W" rebase origin/{{TARGET_BRANCH}}`. Konflikt →
-     `git -C "$W" rebase --abort`, **Abbruch**.
-   - Brachte der Rebase fremde Commits, die dieselben Dateien berühren: eine weitere
-     Review-Runde (zählt zur Rundengrenze der Stufe).
-   - Tests ein letztes Mal grün (Schritt 5 ohne Vorschau-Neustart; die Abnahmetests sind
-     jetzt Teil der Suite; die Harness nur, wenn der Rebase Laufzeit-Pfade geändert hat; die
-     volle Suite geht auch hier über die Warteschlange, die Push-Sperre bleibt dabei
-     gehalten). Brachte der Rebase **nichts** und ist `HEAD` genau der SHA, auf dem die letzte
-     Suite laut Protokoll grün war, entfällt der Lauf — ins Protokoll („Tests auf identischem
-     SHA grün“). Der Commit der Abnahmetests ändert den SHA; dann läuft die Suite einmal.
-   - `git -C "$W" push origin HEAD:{{TARGET_BRANCH}}`. Abgelehnt (jemand außerhalb der Factory
-     war schneller): bis zu **zweimal** fetch, rebase, Tests, push. Dann → **Abbruch**.
-   - Push-Sperre freigeben (`rmdir "$L/push"`), sofort nach dem Push.
-   - `git -C "$M" pull --ff-only` — **nur** wenn `git -C "$M" status --porcelain --untracked-files=no`
-     leer ist (ungetrackte lokale Dateien blockieren nicht, der Fast-Forward fasst sie nicht
-     an) und der Branch `{{TARGET_BRANCH}}` ist; sonst überspringen und im Report sagen, dass
-     die gemeinsame Instanz noch den alten Stand zeigt. Pipeline-Link fürs Protokoll:
+7. **Ship** — everything from "rebase" to "push" under the **push lock**.
+   - Adopt the acceptance tests (rule 8): copy to `{{ACCEPTANCE_COMMIT_DIR}}`,
+     commit `test(<slug>): acceptance tests` (skipped if the slot is empty).
+   - `git -C "$W" status --porcelain` empty (otherwise commit).
+   - Take the push lock (wait in the background, see "Parallel operation"), into the log.
+   - `git -C "$W" fetch origin && git -C "$W" rebase origin/{{TARGET_BRANCH}}`. Conflict →
+     `git -C "$W" rebase --abort`, **abort**.
+   - If the rebase brought in other people's commits that touch the same files: one more
+     review round (counts toward the tier's round limit).
+   - Tests green one last time (step 5 without restarting the preview; the acceptance tests are
+     now part of the suite; the harness only if the rebase changed runtime paths; the
+     full suite also goes through the queue here, the push lock stays
+     held). If the rebase brought in **nothing** and `HEAD` is exactly the SHA on which the last
+     suite was green according to the log, the run is skipped — into the log ("tests green on identical
+     SHA"). The acceptance test commit changes the SHA; then the suite runs once.
+   - `git -C "$W" push origin HEAD:{{TARGET_BRANCH}}`. Rejected (someone outside the factory
+     was faster): up to **twice** fetch, rebase, tests, push. Then → **abort**.
+   - Release the push lock (`rmdir "$L/push"`), immediately after the push.
+   - `git -C "$M" pull --ff-only` — **only** if `git -C "$M" status --porcelain --untracked-files=no`
+     is empty (untracked local files do not block; the fast-forward does not touch
+     them) and the branch is `{{TARGET_BRANCH}}`; otherwise skip and say in the report that
+     the shared instance still shows the old state. Pipeline link for the log:
      `{{PIPELINE_URL}}`. `{{RELEASE_NOTE}}`
-   - **Laufzeit-Pfade im Diff:** Das lokal für Live-Tests genutzte Artefakt ist **nicht** der
-     Lauf-Build `factory-<slug>` (Lehre: ein Lauf wurde als fertig gemeldet, und der Live-Test
-     lief dann auf einem Stand von morgens).
-     - War der Pull in `M` erfolgreich, dort neu bauen, über die Warteschlange:
+   - **Runtime paths in the diff:** The artifact used locally for live tests is **not** the
+     run build `factory-<slug>` (lesson: a run was reported as done, and the live test
+     then ran on a state from the morning).
+     - If the pull in `M` succeeded, rebuild there, via the queue:
        `{{ARTIFACT_LOCAL_REFRESH}}`.
-     - Wurde der Pull übersprungen, **nicht** bauen (das Artefakt hätte die Änderung nicht).
-       Im Report fett: „lokales Artefakt NICHT aktualisiert“.
-     - Laufende Instanzen behalten ihr altes Artefakt — gehört in den Report.
+     - If the pull was skipped, do **not** build (the artifact would not contain the change).
+       In the report, in bold: "local artifact NOT updated".
+     - Running instances keep their old artifact — belongs in the report.
 
-8. **Report und Aufräumen.**
-   - Aufräumen: `{{CLEANUP}}`, `git -C "$M" worktree remove "$W-base"`, Seed-Daten — jeweils
-     nur, wenn vorhanden. `Z` löschen, wenn die Tests committet sind; sonst stehen lassen.
-     Zuletzt die Lauf-Sperre freigeben (`rm -r "$L/run-<slug>"`).
-   - **Status ehrlich benennen.** Grüne Tests und Reviews belegen nicht, dass es im echten
-     Betrieb funktioniert.
-     - Berührt der Diff `{{LIVE_STATUS_PATHS}}`, heißt der Status **„gepusht – Live-Test
-       offen“**. Nie „fertig“.
-     - Dasselbe gilt bei „trotzdem bauen“ trotz unerfüllter Voraussetzung (dann: „gepusht –
-       gegen Attrappe getestet“).
-     - Dieser Status steht im Protokoll, im Artifact und im ersten Satz der Antwort an den
-       Nutzer, zusammen mit der Live-Checkliste.
-   - Artifact „Factory: <slug>“ aus dem Protokoll: Status (gepusht / gepusht – Live-Test
-     offen / abgebrochen + warum), Idee, Annahmen, Tasks ✓/✗, Testzahlen, **Abnahme**
-     (Tests je Anforderungs-ID, Ergebnis gegen Basis und Endstand, Reparaturrunden,
-     Isolationsvariante laut Regel 9), Artefakt gebaut?, **Review-Protokoll** (Runden,
-     Verdicts, behobene Befunde, offene `minor`), Screenshots vorher/nachher **direkt
-     eingebettet** als `data:image/png;base64,…` (bei mehr als 40 Bildern nur die geänderten
-     Ansichten), Vorher/Nachher nebeneinander, Commit-SHAs, Pipeline-Link,
-     **Harness-Vergleich**, **offene Live-Tests** als Checkliste vom Laufzeit-Reviewer.
-     Die Harness ersetzt den Live-Test nicht.
-   - Danach `{{POST_RUN_HOOK}}` (falls gesetzt). OpenSpec-Change **nicht** archivieren — das
-     passiert nach dem Live-Test per `/opsx:archive` (S-Läufe haben keinen Change, nur
-     `tasks.md` und Protokoll). Der Feature-Worktree bleibt stehen.
+8. **Report and cleanup.**
+   - Cleanup: `{{CLEANUP}}`, `git -C "$M" worktree remove "$W-base"`, seed data — each
+     only if present. Delete `Z` if the tests are committed; otherwise leave it.
+     Finally release the run lock (`rm -r "$L/run-<slug>"`).
+   - **Name the status honestly.** Green tests and reviews do not prove that it works in real
+     operation.
+     - If the diff touches `{{LIVE_STATUS_PATHS}}`, the status is **"pushed – live test
+       pending"**. Never "done".
+     - The same applies to "build anyway" despite an unmet prerequisite (then: "pushed –
+       tested against a mock").
+     - This status is in the log, in the artifact and in the first sentence of the answer to the
+       user, together with the live checklist.
+   - Artifact "Factory: <slug>" from the log: status (pushed / pushed – live test
+     pending / aborted + why), idea, assumptions, tasks ✓/✗, test counts, **acceptance**
+     (tests per requirement ID, result against base and final state, repair rounds,
+     isolation variant per rule 9), artifact built?, **review log** (rounds,
+     verdicts, fixed findings, open `minor`), before/after screenshots **embedded
+     directly** as `data:image/png;base64,…` (with more than 40 images only the changed
+     views), before/after side by side, commit SHAs, pipeline link,
+     **harness comparison**, **open live tests** as a checklist from the runtime reviewer.
+     The harness does not replace the live test.
+   - Then `{{POST_RUN_HOOK}}` (if set). Do **not** archive the OpenSpec change — that
+     happens after the live test via `/opsx:archive` (S runs have no change, only
+     `tasks.md` and the log). The feature worktree stays.
 
-## Nachtrag nach dem Report
+## Follow-up after the report
 
-Schaut sich der Nutzer das Ergebnis an und will danach etwas anders („Liste nur mit Datum und
-Titel“), ist sein Wunsch die Freigabe — kein neues Gate. Voraussetzung: es bleibt im Rahmen
-des Changes. Sonst neuer `/factory`-Lauf.
-- Im selben Worktree `W`, vorher `fetch` + `rebase`. Lauf-Sperre wieder nehmen.
-- In `tasks.md` einen Abschnitt „Nachtrag (Nutzerwunsch <Datum>)“ mit den Tasks anlegen,
-  Zeile ins Protokoll.
-- Erst alles suchen, was an der geänderten Stelle hängt (Aufrufer, Quelltext-Guards in den
-  Tests), dann ändern; Guards an das neue Verhalten anpassen, nicht löschen. Das gilt auch
-  für die committeten Abnahmetests: ändert der Nachtrag eine Anforderung, wird der
-  zugehörige Abnahmetest angepasst und das im Commit genannt.
-- Fokussierte Tests, Browser-Check in der Vorschau (Seed-Daten neu laden), volle Suite über
-  `queue.sh`, ein Commit, Push unter der Push-Sperre, `M` nachziehen, aufräumen.
-- Security-Reviewer nur, wenn Backend-Routen oder Rechte im Nachtrag-Diff sind; sonst entfällt
-  die Review-Schleife. Report-Artifact nicht neu bauen, Nachtrag in der Antwort nennen.
+If the user looks at the result and then wants something different ("list only with date and
+title"), their wish is the approval — no new approval gate. Precondition: it stays within the scope
+of the change. Otherwise a new `/factory` run.
+- In the same worktree `W`, `fetch` + `rebase` first. Take the run lock again.
+- In `tasks.md` create a section "Follow-up (user request <date>)" with the tasks,
+  line into the log.
+- First find everything that depends on the changed spot (callers, source guards in the
+  tests), then change it; adapt guards to the new behavior, do not delete them. This also applies
+  to the committed acceptance tests: if the follow-up changes a requirement, the
+  corresponding acceptance test is adapted and that is mentioned in the commit.
+- Focused tests, browser check in the preview (reload seed data), full suite via
+  `queue.sh`, one commit, push under the push lock, update `M`, clean up.
+- Security reviewer only if backend routes or permissions are in the follow-up diff; otherwise the
+  review loop is skipped. Do not rebuild the report artifact; mention the follow-up in the answer.
 
-## Abbruch (aus Schritt 3b–7)
+## Abort (from steps 3b–7)
 
-Die Arbeit geht nie verloren: Push-Sperre freigeben, falls gehalten, eigenes
-Warteschlangen-Ticket löschen; laufenden Rebase abbrechen (`git -C "$W" rebase --abort`),
-offene Änderungen als `wip(factory): <Grund>` committen, wenn `{{ABORT_PUSH_OK}}`: **nur den
-Feature-Branch** sichern (`git -C "$W" push origin {{FEATURE_BRANCH}}`), Grund und Schritt ins
-Protokoll, dann Schritt 8 mit Status „abgebrochen“. `Z` und der Zeiger
-`{{SEALED_ROOT}}/index/<slug>` bleiben stehen, damit ein späterer Lauf dieselben Tests
-weiterverwendet. Ein späteres `/factory` mit derselben Idee bzw. demselben
-Slug setzt dort fort.
+The work is never lost: release the push lock if held, delete your own
+queue ticket; abort a running rebase (`git -C "$W" rebase --abort`),
+commit uncommitted changes as `wip(factory): <reason>`, if `{{ABORT_PUSH_OK}}`: back up **only the
+feature branch** (`git -C "$W" push origin {{FEATURE_BRANCH}}`), reason and step into the
+log, then step 8 with status "aborted". `Z` and the pointer
+`{{SEALED_ROOT}}/index/<slug>` stay in place so that a later run reuses the same tests.
+A later `/factory` with the same idea or the same
+slug resumes there.
 
-## Stolperfallen (aus echten Läufen)
+## Pitfalls (from real runs)
 
-- `rm -f "$Q/$T"` blockt die rm-Sicherheitsprüfung → `"${Q:?}/${T:?}"` schreiben. Ebenso
-  `rm -rf out/...` für alte Harness-Läufe: lieber unter neuem Tag bauen (`factory-<slug>-r1`),
-  dann vermischen sich Läufe nicht.
-- Python-Werkzeuge unter Windows: Emoji in der Ausgabe stürzen mit cp1252 ab → mit
-  `PYTHONIOENCODING=utf-8` starten (in `&&`-Ketten bricht sonst die ganze Kette).
-- Git-Bash: jeder Pfad an `docker` braucht `MSYS_NO_PATHCONV=1`, sonst wird `/srv/…` zu
+- `rm -f "$Q/$T"` triggers the rm safety check → write `"${Q:?}/${T:?}"`. Likewise
+  `rm -rf out/...` for old harness runs: better build under a new tag (`factory-<slug>-r1`),
+  then runs do not get mixed up.
+- Python tools on Windows: emoji in the output crash with cp1252 → start with
+  `PYTHONIOENCODING=utf-8` (otherwise the whole `&&` chain breaks).
+- Git Bash: every path passed to `docker` needs `MSYS_NO_PATHCONV=1`, otherwise `/srv/…` becomes
   `C:/Program Files/Git/srv/…`.
-- Git-Bash: `$HOME` ist `/c/Users/…`; mit `MSYS_NO_PATHCONV=1` versteht Docker Desktop das
-  nicht. `SEALED_ROOT` (und jeden anderen Mount-Pfad) im Windows-Format setzen, z. B.
+- Git Bash: `$HOME` is `/c/Users/…`; with `MSYS_NO_PATHCONV=1` Docker Desktop does not understand
+  that. Set `SEALED_ROOT` (and every other mount path) in Windows format, e.g.
   `$(cygpath -m "$HOME")/.factory-sealed`.
-- `$(pwd)` in einer Subagent-Shell ist der Session-Ordner, nicht der Worktree — Pfade immer
-  wörtlich übergeben.
-- Der `security-review`-Skill braucht ein Git-Arbeitsverzeichnis; Reviewer arbeiten mit
-  `git -C "$W"` oder der Diff-Datei.
-- Ein Reviewer, der auf der gemeinsamen Instanz `/logout` aufruft, meldet dort alle ab —
-  deshalb „nur ansehen“.
-- Lohnt sich die Factory? Bei M/L mit Rechten/Auth/Daten ja (echte Funde: Kontoübernahme,
-  Rollen-Lücken, Mobil-Umbruch). Bei kleinen UI-Changes ist S der richtige Modus; bei
-  Einzeiler-Bugfixes ist ein normaler Fix schneller.
+- `$(pwd)` in a subagent shell is the session folder, not the worktree — always pass paths
+  verbatim.
+- The `security-review` skill needs a git working directory; reviewers work with
+  `git -C "$W"` or the diff file.
+- A reviewer that calls `/logout` on the shared instance logs everyone out there —
+  hence "view only".
+- Is the factory worth it? For M/L with permissions/auth/data, yes (real findings: account takeover,
+  role gaps, mobile line wrapping). For small UI changes S is the right mode; for
+  one-line bug fixes a normal fix is faster.

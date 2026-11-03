@@ -1,185 +1,185 @@
-# /factory — Spec-driven Software Factory für Claude Code
+# /factory — Spec-driven Software Factory for Claude Code
 
-Ein Claude-Code-Skill, der aus **einer Zeile Feature-Idee** einen kompletten, geprüften Commit
-auf deinem Integrations-Branch macht:
+A Claude Code skill that turns **a one-line feature idea** into a complete, reviewed commit
+on your integration branch:
 
-## Architektur
+## Architecture
 
-### Ablauf eines Laufs
+### How a run works
 
 ```mermaid
 flowchart TD
-    idea(["/factory &quot;Idee&quot;"]) --> intake["1 · Intake & Preflight<br/>Slug, Lauf-Sperre, Worktree W,<br/>externe Voraussetzungen per curl"]
-    intake --> tier{"Vorab-Stufe"}
-    tier -- "S" --> plan["2 · Kurzplan<br/>(Hauptagent, ohne OpenSpec)"]
-    tier -- "M / L" --> spec["2 · Spec-Agent<br/>OpenSpec: Anforderungen A1…An,<br/>Schnittstellen, Testplan, Weichen"]
-    spec --> deps["Abhängigkeits-Prüfer<br/>Tasks ergänzen, Stufe festlegen"]
+    idea(["/factory &quot;idea&quot;"]) --> intake["1 · Intake & Preflight<br/>Slug, run lock, worktree W,<br/>external requirements via curl"]
+    intake --> tier{"Preliminary tier"}
+    tier -- "S" --> plan["2 · Short plan<br/>(orchestrator, without OpenSpec)"]
+    tier -- "M / L" --> spec["2 · Spec agent<br/>OpenSpec: requirements A1…An,<br/>interfaces, test plan, decision points"]
+    spec --> deps["Dependency checker<br/>add tasks, set tier"]
     plan --> gate
-    deps --> gate{{"3 · GATE – die einzige Rückfrage<br/>≤ 3 Weichen + Bauen / Ändern / Abbrechen"}}
-    gate -- "Ändern" --> spec
-    gate -- "Abbrechen" --> stop(["Ende, Arbeit bleibt liegen"])
-    gate -- "Bauen" --> author & build
+    deps --> gate{{"3 · APPROVAL GATE – the only question<br/>≤ 3 decision points + Build / Change / Abort"}}
+    gate -- "Change" --> spec
+    gate -- "Abort" --> stop(["End, work is left in place"])
+    gate -- "Build" --> author & build
 
-    author["3b · Test-Autor<br/>schreibt versiegelte Abnahmetests<br/>nur aus Spec + altem Code"]:::sealed --> Z[("Z · versiegelt<br/>außerhalb Repo & Spec<br/>+ sha256-Manifest")]:::sealed
-    build["4 · Build<br/>Implementer je Task-Gruppe (SDD),<br/>eigene TDD-Tests, Commits in W"] --> verify
+    author["3b · Test author<br/>writes sealed acceptance tests<br/>only from spec + old code"]:::sealed --> Z[("Z · sealed<br/>outside repo & spec<br/>+ sha256 manifest")]:::sealed
+    build["4 · Build<br/>implementer per task group (SDD),<br/>own TDD tests, commits in W"] --> verify
 
-    Z -.->|nur Ergebnis| verify
-    verify["5 · Verify<br/>volle Suite · Abnahmetests · Artefakt-Build<br/>Szenario-Harness · Vorschau-Instanz"]
-    verify -- "rot" --> judge["Abnahme-Richter<br/>übersetzt in: A3 erwartet X, beobachtet Y"]:::sealed
-    judge --> fixA["Fix-Agent (frisch)<br/>sieht nur die Rückmeldung"] --> verify
-    verify -- "grün" --> review
+    Z -.->|result only| verify
+    verify["5 · Verify<br/>full suite · acceptance tests · artifact build<br/>scenario harness · preview instance"]
+    verify -- "red" --> judge["Acceptance judge<br/>translates into: A3 expected X, observed Y"]:::sealed
+    judge --> fixA["Fix agent (fresh)<br/>sees only the feedback"] --> verify
+    verify -- "green" --> review
 
-    review["6 · Review-Schleife (parallel)<br/>Security · Laufzeit · Abhängigkeiten · UI/UX"]
-    review -- "CHANGES_REQUESTED<br/>(max. 2 bzw. 5 Runden)" --> fixR["Fix-Agent<br/>ein Commit je Runde"] --> verify
-    review -- "alle APPROVED" --> ship
+    review["6 · Review loop (parallel)<br/>Security · Runtime · Dependencies · UI/UX"]
+    review -- "CHANGES_REQUESTED<br/>(max. 2 or 5 rounds)" --> fixR["Fix agent<br/>one commit per round"] --> verify
+    review -- "all APPROVED" --> ship
 
-    ship["7 · Ship (unter Push-Sperre)<br/>Abnahmetests committen → rebase →<br/>Tests → push TARGET_BRANCH"] --> report
-    report(["8 · Report-Artifact + Aufräumen<br/>Status ehrlich: „gepusht – Live-Test offen“"])
+    ship["7 · Ship (under push lock)<br/>commit acceptance tests → rebase →<br/>tests → push TARGET_BRANCH"] --> report
+    report(["8 · Report artifact + cleanup<br/>Honest status: “pushed – live test pending”"])
 
     classDef sealed fill:#fde7e7,stroke:#c0392b,color:#000
 ```
 
-Abbruch ist aus jedem Schritt ab 3b möglich (Grenzen für Reparaturen und Runden stehen im
-Protokoll): Arbeit wird als `wip` committet, Feature-Branch gesichert, ein späterer Aufruf
-mit demselben Slug setzt fort.
+Aborting is possible from any step from 3b onward (limits for repairs and rounds are in the
+log): work is committed as `wip`, the feature branch is saved, and a later invocation
+with the same slug resumes.
 
-### Wer sieht die Abnahmetests?
+### Who sees the acceptance tests?
 
 ```mermaid
 flowchart LR
-    subgraph sichtbar["sieht Code & Spec – nicht die Abnahmetests"]
+    subgraph sichtbar["sees code & spec – not the acceptance tests"]
         impl["Implementer"]
-        fix["Fix-Agenten"]
-        rev["Reviewer"]
-        main["Hauptagent<br/>(Orchestrator)"]
+        fix["Fix agents"]
+        rev["Reviewers"]
+        main["Main agent<br/>(orchestrator)"]
     end
-    subgraph versiegelt["versiegelt"]
-        author["Test-Autor"]:::sealed
-        Z[("Z · Abnahmetests")]:::sealed
-        judge["Abnahme-Richter"]:::sealed
+    subgraph versiegelt["sealed"]
+        author["Test author"]:::sealed
+        Z[("Z · acceptance tests")]:::sealed
+        judge["Acceptance judge"]:::sealed
     end
-    W[("Worktree W<br/>+ Spec S")]
+    W[("Worktree W<br/>+ spec S")]
 
-    impl & fix -- "lesen/schreiben" --> W
-    rev -- "lesen" --> W
-    author -- "schreibt" --> Z
-    judge -- "liest" --> Z
-    Z -- "nur: bestanden N/M,<br/>rote Test-IDs" --> main
-    judge -- "gefilterte Rückmeldung<br/>(Anforderung, kein Testcode)" --> fix
-    main -- "Ergebnis als Zahl" --> rev
+    impl & fix -- "read/write" --> W
+    rev -- "read" --> W
+    author -- "writes" --> Z
+    judge -- "reads" --> Z
+    Z -- "only: passed N/M,<br/>red test IDs" --> main
+    judge -- "filtered feedback<br/>(requirement, no test code)" --> fix
+    main -- "result as a number" --> rev
 
     classDef sealed fill:#fde7e7,stroke:#c0392b,color:#000
 ```
 
-### Parallelbetrieb
+### Parallel runs
 
 ```mermaid
 flowchart LR
-    r1["Lauf A"] & r2["Lauf B"] & r3["Lauf C"] --> L
-    subgraph L["L · Sperren-Ordner"]
-        run["run-&lt;slug&gt;/<br/>ein Lauf je Slug"]
-        q["queue/<br/>FIFO für schwere Jobs<br/>(volle Suite, Builds, Harness)"]
-        push["push/<br/>genau ein Lauf von rebase bis push"]
+    r1["Run A"] & r2["Run B"] & r3["Run C"] --> L
+    subgraph L["L · Lock folder"]
+        run["run-&lt;slug&gt;/<br/>one run per slug"]
+        q["queue/<br/>FIFO for heavy jobs<br/>(full suite, builds, harness)"]
+        push["push/<br/>exactly one run from rebase to push"]
     end
     push --> origin[("origin/TARGET_BRANCH")]
 ```
 
-Alle Sperren mit `mkdir` (atomar) und Herzschlag per `touch`; verwaiste Sperren räumt der
-nächste Lauf weg.
+All locks use `mkdir` (atomic) and a heartbeat via `touch`; orphaned locks are cleaned up by
+the next run.
 
-Herkunft: im MeetingAgent-Projekt über ~10 echte Läufe entstanden und nachgeschärft; dies ist
-die projektneutrale Fassung. Alles Projektspezifische steckt in **einer** Datei,
+Origin: developed and refined in the MeetingAgent project over ~10 real runs; this is
+the project-neutral version. Everything project-specific lives in **one** file,
 `factory.config.md`.
 
-## Was sie besonders macht
+## What makes it different
 
-- **Genau ein Gate.** Statt 20 Annahmen abzunicken, fragt das Gate höchstens 3 „Weichen“ —
-  Entscheidungen, die Ergebnis, Architektur oder Aufwand deutlich ändern — bei Optik mit
-  ASCII-Skizzen. Danach läuft alles ohne Rückfrage durch.
-- **Versiegelte Abnahmetests.** Ein eigener Test-Autor schreibt aus der Spec Abnahmetests in
-  einen Ordner außerhalb von Repo und Spec. **Der Agent, der die Aufgabe umsetzt, kennt sie
-  nicht** — weder Ort noch Inhalt — und kann sie daher weder gezielt erfüllen noch abschwächen.
-  Auch Orchestrator und Reviewer sehen nur das Ergebnis. Bei Rot bekommt der Fix-Agent nur
-  eine gefilterte Rückmeldung („Anforderung A3: erwartet X, beobachtet Y“), nie den Testcode.
-  Hash-Manifest gegen Manipulation; Änderungen an Test-Infrastruktur sind ein Security-Befund.
-  Nach bestandener Abnahme werden die Tests als Regressionstests committet.
-  Details: `SKILL.md`, Abschnitt „Abnahmetests“ (inkl. ehrlicher Grenze der Isolation).
-- **Stufen S/M/L.** Eine CSS-Änderung bekommt keinen 40-Minuten-Review. Die Stufe wird vorab
-  geschätzt, am Gate angezeigt, und am echten Diff automatisch hoch-, nie heruntergestuft.
-- **Review-Schleife bis alle zufrieden sind** — mit Befund-IDs, Rundengrenzen, klaren
-  Abbruchregeln und Konfliktreihenfolge.
-- **Parallelbetrieb.** Mehrere Läufe in mehreren Sessions gleichzeitig: Lauf-Sperre,
-  Push-Sperre, FIFO-Warteschlange für schwere Jobs (`queue.sh`) mit Herzschlag.
-- **Ehrlicher Status.** Grüne Tests ≠ funktioniert live: bei kritischen Pfaden heißt der Status
-  „gepusht – Live-Test offen“, mit Checkliste.
-- **Fortsetzbar.** `$S/factory-log.md` ist die einzige Wahrheit; ein erneuter Aufruf mit
-  demselben Slug setzt fort.
+- **Exactly one approval gate.** Instead of nodding through 20 assumptions, the gate asks at most 3 "decision points" —
+  decisions that significantly change the result, architecture or effort — with
+  ASCII sketches for visual matters. After that, everything runs through without further questions.
+- **Sealed acceptance tests.** A dedicated test author writes acceptance tests from the spec into
+  a folder outside the repo and the spec. **The agent implementing the task does not know
+  them** — neither location nor content — and so can neither tailor its work to them nor weaken them.
+  The orchestrator and reviewers also see only the result. On red, the fix agent gets only
+  filtered feedback ("Requirement A3: expected X, observed Y"), never the test code.
+  Hash manifest against tampering; changes to test infrastructure are a security finding.
+  Once acceptance passes, the tests are committed as regression tests.
+  Details: `SKILL.md`, section "Acceptance tests" (including an honest limit of the isolation).
+- **Tiers S/M/L.** A CSS change does not get a 40-minute review. The tier is estimated
+  up front, shown at the approval gate, and automatically raised based on the real diff, never lowered.
+- **Review loop until everyone is satisfied** — with finding IDs, round limits, clear
+  abort rules and a conflict order.
+- **Parallel runs.** Several runs in several sessions at once: run lock,
+  push lock, FIFO queue for heavy jobs (`queue.sh`) with heartbeat.
+- **Honest status.** Green tests ≠ works live: for critical paths the status is
+  "pushed – live test pending", with a checklist.
+- **Resumable.** `$S/factory-log.md` is the single source of truth; invoking again with
+  the same slug resumes.
 
-## Dateien
+## Files
 
-| Datei | Inhalt |
+| File | Content |
 |---|---|
-| `SKILL.md` | Der Ablauf (Schritte 1–8, Abnahmetests, Parallelbetrieb, Abbruch, Nachtrag) |
-| `reviewers.md` | Prüflisten, Zuständigkeit und Antwortformat der Reviewer |
-| `queue.sh` | Warteschlange für schwere Jobs (generisch, unverändert nutzbar) |
-| `factory.config.example.md` | Vorlage für den Projekt-Adapter — alle Slots |
-| `examples/meetingagent.factory.config.md` | Ausgefülltes Beispiel aus dem Ursprungsprojekt (enthält interne Namen/URLs — vor einer Veröffentlichung des Repos entfernen) |
+| `SKILL.md` | The procedure (steps 1–8, acceptance tests, parallel runs, abort, follow-up) |
+| `reviewers.md` | Checklists, responsibilities and response format of the reviewers |
+| `queue.sh` | Queue for heavy jobs (generic, usable unchanged) |
+| `factory.config.example.md` | Template for the project adapter — all slots |
+| `examples/meetingagent.factory.config.md` | Filled-in example from the original project (contains internal names/URLs — remove before publishing the repo) |
 
-## Voraussetzungen
+## Requirements
 
-Pflicht:
-- Claude Code mit Subagents (`Agent`-Tool) und `AskUserQuestion`.
-- [OpenSpec](https://github.com/Fission-AI/OpenSpec) CLI (`openspec`) und die OpenSpec-Skills
-  im Session-Ordner (`openspec init` legt `openspec-propose`, `openspec-update-change`,
-  `opsx:archive` … an).
-- Superpowers-Plugin: `superpowers:subagent-driven-development`,
+Required:
+- Claude Code with subagents (`Agent` tool) and `AskUserQuestion`.
+- [OpenSpec](https://github.com/Fission-AI/OpenSpec) CLI (`openspec`) and the OpenSpec skills
+  in the session folder (`openspec init` creates `openspec-propose`, `openspec-update-change`,
+  `opsx:archive` …).
+- Superpowers plugin: `superpowers:subagent-driven-development`,
   `superpowers:systematic-debugging`.
-- Skill `security-review` (in Claude Code eingebaut).
-- `git` mit Worktrees, `bash` (unter Windows Git-Bash), `curl`.
+- Skill `security-review` (built into Claude Code).
+- `git` with worktrees, `bash` (Git Bash on Windows), `curl`.
 
 Optional:
-- Docker (Testläufe in Containern, Vorschau-Instanz, Artefakt-Builds).
-- UI-Skills für den UI/UX-Reviewer: `taste-skill`, `ui-ux-pro-max`, `design:*`.
-- Ein Headless-Screenshot-Werkzeug, das parallel laufen kann (z. B. ein kleines
-  Puppeteer/CDP-Skript).
-- Eine Szenario-Harness/Simulator für End-to-End-Tests des ausgelieferten Artefakts.
+- Docker (test runs in containers, preview instance, artifact builds).
+- UI skills for the UI/UX reviewer: `taste-skill`, `ui-ux-pro-max`, `design:*`.
+- A headless screenshot tool that can run in parallel (e.g. a small
+  Puppeteer/CDP script).
+- A scenario harness/simulator for end-to-end tests of the shipped artifact.
 
-## Installation in einem Projekt
+## Installing in a project
 
-1. Skill-Ordner ins Projekt legen (oder global):
+1. Put the skill folder into the project (or globally):
    ```bash
    git clone git@github.com:Sighte/factory-skill.git <repo>/.claude/skills/factory
-   # oder als Submodule, damit Updates mitkommen
+   # or as a submodule, so updates come along
    ```
-   Startet die Session nicht im Repo, sondern in einem Oberordner (Worktrees als
-   Geschwister), dort `.claude/skills/factory` als Verknüpfung auf den Repo-Ordner anlegen.
-2. `factory.config.example.md` nach `$R/factory.config.md` kopieren (Session-Ordner,
-   **außerhalb** des Repos — die Config nennt Ort und Runner der versiegelten Tests, und
-   Implementer lesen den Worktree) und **jeden** Slot füllen. Am schnellsten: Claude in einer Session bitten, „die factory.config.md für
-   dieses Repo anhand der Vorlage auszufüllen“ — und das Ergebnis selbst prüfen (Branches,
-   geschützte Jobs, Testbefehle).
-3. In die Projektregeln (`CLAUDE.md`) aufnehmen:
-   > Ausnahme `/factory`: pusht nach Gate, grünen Tests, bestandener Abnahme und
-   > Review-Schleife direkt nach `<TARGET_BRANCH>`, ohne MR.
+   If the session starts not in the repo but in a parent folder (worktrees as
+   siblings), create `.claude/skills/factory` there as a link to the repo folder.
+2. Copy `factory.config.example.md` to `$R/factory.config.md` (session folder,
+   **outside** the repo — the config names the location and runner of the sealed tests, and
+   implementers read the worktree) and fill in **every** slot. Fastest: ask Claude in a session "to fill in the factory.config.md for
+   this repo based on the template" — and check the result yourself (branches,
+   protected jobs, test commands).
+3. Add to the project rules (`CLAUDE.md`):
+   > Exception `/factory`: after the approval gate, green tests, passed acceptance and
+   > review loop, pushes directly to `<TARGET_BRANCH>`, without an MR.
 
-   Sonst melden die Reviewer das als Befund.
-4. `.superpowers/` in `.gitignore` (Arbeitsordner der Subagents).
-5. Ersten Lauf mit einer kleinen Idee machen (Stufe S) und `factory-log.md` lesen.
+   Otherwise the reviewers report this as a finding.
+4. Add `.superpowers/` to `.gitignore` (working folder of the subagents).
+5. Do a first run with a small idea (tier S) and read `factory-log.md`.
 
-## Aufruf
+## Usage
 
 ```
-/factory "Neuigkeiten-Knopf im Kopf, zeigt die letzten 5 Änderungen"
+/factory "News button in the header, shows the last 5 changes"
 ```
 
-Am Gate: Weichen beantworten, dann **Bauen** / **Ändern** / **Abbrechen**. Danach läuft der
-Lauf allein bis zum Push und endet mit einem Report-Artifact (Status, Abnahme je
-Anforderung, Review-Protokoll, Screenshots vorher/nachher, offene Live-Tests).
+At the approval gate: answer the decision points, then **Build** / **Change** / **Abort**. After that the
+run proceeds on its own until the push and ends with a report artifact (status, acceptance per
+requirement, review log, before/after screenshots, pending live tests).
 
-## Anpassen
+## Customizing
 
-- Mehr/andere Reviewer: Abschnitt in `reviewers.md` + Zeile in der Zuständigkeitstabelle +
-  Slot in der Config.
-- Strengere Abnahme-Isolation: `SKILL.md`, Abnahmetests Regel 9 (eigener Host/Dienst für `Z`).
-- Projekt-Lehren gehören in die Config (`*_EXTRA`, `HARNESS_NOTES`), nicht in `SKILL.md` —
-  so bleibt der Skill zwischen Projekten gleich.
+- More/different reviewers: section in `reviewers.md` + row in the responsibilities table +
+  slot in the config.
+- Stricter acceptance isolation: `SKILL.md`, acceptance tests rule 9 (separate host/service for `Z`).
+- Project lessons belong in the config (`*_EXTRA`, `HARNESS_NOTES`), not in `SKILL.md` —
+  that way the skill stays the same across projects.
