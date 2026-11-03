@@ -1,7 +1,8 @@
 # factory.config.md — Projekt-Adapter für `/factory`
 
-Diese Datei kopierst du als `factory.config.md` in das Projekt (empfohlen:
-`<repo>/.claude/factory.config.md`) und füllst jeden Slot aus. `SKILL.md` und `reviewers.md`
+Diese Datei kopierst du als `factory.config.md` in den Session-Ordner `R` (empfohlen:
+`$R/factory.config.md`, **außerhalb** des Repos — sonst lesen Implementer im Worktree, wo die
+versiegelten Abnahmetests liegen; Fallback `<repo>/.claude/factory.config.md`) und füllst jeden Slot aus. `SKILL.md` und `reviewers.md`
 nennen nur die Slot-Namen (`{{TARGET_BRANCH}}` usw.); die Werte stehen ausschließlich hier.
 Ein leerer optionaler Slot heißt: dieser Teil des Ablaufs entfällt.
 
@@ -57,7 +58,7 @@ Jeder Befehl mit `$W` als Platzhalter für den Worktree (wird den Subagents wör
 | Slot | Bedeutung | Wert |
 |---|---|---|
 | `ACCEPTANCE_STYLE` | Wie die Abnahmetests geschrieben werden: `unit` (gleiche Sprache/Framework wie die Suite, gegen die öffentlichen Schnittstellen aus der Spec), `blackbox` (HTTP/CLI/Browser gegen die laufende Vorschau) oder beides. | `…` |
-| `ACCEPTANCE_RUN` | Befehl, der die Tests aus `$Z` gegen `$W` laufen lässt, **ohne** sie in `$W` abzulegen (Read-only-Mount oder Kopie in einen Wegwerf-Container). | ```…``` |
+| `ACCEPTANCE_RUN` | Befehl, der die Tests aus `$Z` gegen `$W` laufen lässt, **ohne** sie in `$W` abzulegen (Read-only-Mount oder Kopie in einen Wegwerf-Container). Ausgabe **nur** Zusammenfassung + Namen roter Tests, keine Tracebacks/Assertions (z. B. `pytest -q --tb=no -rf … 2>&1 \| sed 's/ - .*$//'`). | ```…``` |
 | `ACCEPTANCE_TIERS` | In welchen Stufen es versiegelte Abnahmetests gibt. Default `M,L` (bei S optional). | `M,L` |
 | `ACCEPTANCE_FEEDBACK` | Was ein Fix-Agent bei roten Abnahmetests sieht: `requirement` (nur Anforderungs-ID + Verhalten erwartet/beobachtet, Default) oder `assertion` (Testname + Assertion-Text + Traceback-Kopf, nie die Testdatei). | `requirement` |
 | `ACCEPTANCE_COMMIT_DIR` | Wohin die Tests nach bestandener Abnahme im Repo committet werden (Regressionsschutz). Leer = nicht committen. | `tests/acceptance/` |

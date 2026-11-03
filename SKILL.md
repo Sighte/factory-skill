@@ -10,7 +10,7 @@ läuft alles durch — auch eingebundene Skills stellen keine Fragen (siehe Schr
 
 **Projekt-Adapter:** Alle projekt­spezifischen Werte (Branches, Testbefehle, Pfade, Reviewer-
 Zuständigkeit, Stufen-Kriterien, Vorschau, Harness) stehen in `factory.config.md` des Projekts
-(Suche: `<repo>/.claude/factory.config.md`, dann `$R/factory.config.md`). Im Text unten
+(Suche: zuerst `$R/factory.config.md` — außerhalb des Worktrees, damit Implementer `SEALED_ROOT` und `ACCEPTANCE_RUN` nicht lesen —, dann `<repo>/.claude/factory.config.md`). Im Text unten
 stehen sie als `{{SLOT}}`. **Fehlt die Datei oder ein Pflicht-Slot, anhalten** und sagen,
 welcher fehlt (Vorlage: `factory.config.example.md` neben dieser Datei). Ein leerer
 optionaler Slot heißt: der zugehörige Teil entfällt (und das steht im Report).
@@ -65,8 +65,7 @@ darauf wartet, macht jede Minute `touch` darauf — bei langen Befehlen per Hint
 `( while sleep 60; do touch "$X" 2>/dev/null || break; done ) & HB=$!` … `kill $HB`.
 
 - **Lauf-Sperre** `$L/run-<slug>/`: verhindert, dass zwei Sessions denselben Lauf fahren.
-  Darin `owner` (Startzeit + Zufalls-ID; die ID steht auch im Protokollkopf) und `sealed`
-  (Pfad `Z`, siehe „Abnahmetests“). Bei jedem Protokolleintrag `touch` auf die Sperre.
+  Darin `owner` (Startzeit + Zufalls-ID; die ID steht auch im Protokollkopf). Bei jedem Protokolleintrag `touch` auf die Sperre.
   Freigeben in Schritt 8, bei Abbruch und bei „Abbrechen“ am Gate. Ist sie schon da: letzter
   `touch` jünger als 90 min → **anhalten** mit „läuft in einer anderen Session (letztes
   Lebenszeichen vor N min); ist die abgestürzt: `rm -r $L/run-<slug>` und `/factory` erneut“.
@@ -112,7 +111,7 @@ Die einzige Wahrheit über den Lauf — Kontext kann zusammengefasst werden, die
 Kopf (einmal, in Schritt 1): Idee, Slug, `R`, `M`, `W`, `S`, `L`, Owner-ID der Lauf-Sperre,
 Basis-SHA; nach Schritt 2 `Stufe` + Grund; nach Schritt 3b das **Manifest** der
 Abnahmetests (Anzahl + `sha256` je Datei, **kein** Pfad, kein Inhalt); später `P=<Port>`.
-Der Pfad `Z` steht **nicht** im Protokoll (Implementer lesen `$S`), nur in `$L/run-<slug>/sealed`.
+Der Pfad `Z` steht **nicht** im Protokoll (Implementer lesen `$S`), nur im Zeiger `{{SEALED_ROOT}}/index/<slug>` (`$L` geht an jeden Subagent, darum dort nicht).
 Danach je Ereignis eine Zeile, **sofort** nach dem Ereignis anhängen:
 
 ```
@@ -173,7 +172,7 @@ erfüllen („teaching to the test“) noch abschwächen, überspringen oder lö
 
 1. **Ort:** `Z = {{SEALED_ROOT}}/<slug>-<zufall>` (`zufall` = 8 Hex-Zeichen), **außerhalb**
    von `R`, `W` und `S` — eine Repo- oder Spec-Suche findet sie nicht. Der Pfad steht nur in
-   `$L/run-<slug>/sealed`, nie im Protokoll, nie in `tasks.md`/`design.md`, nie in einem
+   im Zeiger `{{SEALED_ROOT}}/index/<slug>` (nicht in `$L` — das bekommt jeder Subagent), nie im Protokoll, nie in `tasks.md`/`design.md`, nie in einem
    Prompt an Implementer, Fix-Agent oder Reviewer.
 2. **Hauptagent bleibt blind:** Er liest die Testdateien nie (kein `Read`, kein `cat` auf `Z`),
    bis der Lauf vorbei ist. Sonst sickern sie über seinen Kontext in jeden späteren Prompt —
@@ -193,6 +192,13 @@ erfüllen („teaching to the test“) noch abschwächen, überspringen oder lö
    ohne sie in `W` zu kopieren (Read-only-Mount in einen Wegwerf-Container oder Kopie von
    `W` + `Z` in ein Temp-Verzeichnis, das danach gelöscht wird). Die Tests sind damit nie in
    einem Commit, den ein Implementer sieht.
+   **Die Ausgabe ist Teil der Versiegelung:** Ein normaler Testlauf druckt bei Rot Quelltext
+   und Werte der Tests (Tracebacks, Assertions). `{{ACCEPTANCE_RUN}}` gibt deshalb **nur**
+   Zusammenfassung + Namen der roten Tests aus (z. B. pytest `--tb=no -rf`, Rest per `sed`
+   abgeschnitten), und die Ausgabedatei liegt in `{{SEALED_ROOT}}/out/<slug>-<n>.txt` — **nie**
+   unter `$W` (`$W/.superpowers/` lesen Implementer und Fix-Agenten). Die lange Fassung mit
+   Tracebacks erzeugt nur der Abnahme-Richter (Regel 7) selbst, ebenfalls nach
+   `{{SEALED_ROOT}}/out/`.
 6. **Manipulationsschutz:** Vor jedem Abnahmelauf `sha256sum` über `Z` gegen das Manifest im
    Protokoll — Abweichung = **Abbruch** („Abnahmetests verändert“). Zusätzlich prüft der
    Hauptagent im Diff, ob der Lauf Test-Infrastruktur so ändert, dass fremde Tests anders
@@ -214,9 +220,11 @@ erfüllen („teaching to the test“) noch abschwächen, überspringen oder lö
    (`test(<slug>): Abnahmetests`) — ab dann sind sie normale Regressionstests. Das passiert
    in Schritt 7 **nach** der letzten Review-Runde und vor dem Rebase; die volle Suite läuft
    danach ohnehin noch einmal. Leerer Slot → nicht committen, `Z` bleibt für spätere Läufe
-   liegen (Pfad im Report).
-9. **Ehrliche Grenze:** Die Isolation ist Weglassen + Anweisung + Nachkontrolle (Hash,
-   Diff-Prüfung), keine harte Sandbox. Ein Agent mit Shell könnte das Dateisystem
+   liegen (Pfad im Report). **Nach diesem Commit darf kein Fix-Commit
+   `{{ACCEPTANCE_COMMIT_DIR}}` berühren** (die Tests sind jetzt normale Dateien im Worktree) —
+   der Hauptagent prüft den Diff jedes späteren Fix-Commits, Verstoß = Abbruch.
+9. **Ehrliche Grenze:** Die Isolation ist Weglassen + Anweisung + gefilterte Ausgabe +
+   Nachkontrolle (Hash, Diff-Prüfung), keine harte Sandbox. Ein Agent mit Shell könnte das Dateisystem
    durchsuchen. Wer es härter will: `Z` auf einem Pfad/Host, auf den die Session keine
    Leserechte hat, und `{{ACCEPTANCE_RUN}}` als Dienst, der nur „bestanden/nicht bestanden“
    zurückgibt. Im Report steht, welche Variante lief.
@@ -245,7 +253,7 @@ Die **volle** Suite und Artefakt-Builds laufen immer über die Warteschlange
      **Lauf-Sperre** nehmen (siehe „Parallelbetrieb“). Gelingt das nicht: anhalten.
    - **Fortsetzen:** Gibt es `$S/factory-log.md`, den Lauf ab dem letzten protokollierten
      Schritt fortsetzen (Gate erneut zeigen, falls es noch nicht beantwortet war; `Z` aus
-     `$L/run-<slug>/sealed`, fehlt die Datei aber das Manifest steht im Protokoll: Schritt 3b
+     dem Zeiger `{{SEALED_ROOT}}/index/<slug>`, fehlt die Datei aber das Manifest steht im Protokoll: Schritt 3b
      neu, neues Manifest). Gibt es Change oder Worktree **ohne** Protokoll: anhalten, nennen
      (Slug ist von Hand oder von einem anderen Werkzeug belegt — anderen Slug vorschlagen).
    - Preflight, jeder Punkt muss stimmen, sonst anhalten und sagen, was fehlt:
@@ -330,7 +338,7 @@ Die **volle** Suite und Artefakt-Builds laufen immer über die Warteschlange
 
 3b. **Abnahmetests schreiben (versiegelt)** — nur in Stufen laut `{{ACCEPTANCE_TIERS}}`,
    startet direkt nach „Bauen“ und läuft **parallel** zu Schritt 4.
-   - `Z` anlegen (`mkdir -p`, Zufallssuffix), Pfad nach `$L/run-<slug>/sealed`.
+   - `Z` anlegen (`mkdir -p`, Zufallssuffix), Pfad in den Zeiger `{{SEALED_ROOT}}/index/<slug>`.
    - **Test-Autor** (frischer `general-purpose`, nie `fork`; Modell wie Reviewer der Stufe)
      bekommt: `S` (Spec nach dem Gate), `M` (Code-Stand **vor** der Änderung, nur lesen),
      `Z`, `{{ACCEPTANCE_STYLE}}`, `{{ACCEPTANCE_RUN}}`, `{{PROJECT_RULES}}`. **Nicht** `W` —
@@ -344,6 +352,9 @@ Die **volle** Suite und Artefakt-Builds laufen immer über die Warteschlange
      - nur gegen die Schnittstellen aus `design.md` — keine Annahmen über interne
        Hilfsfunktionen, Dateinamen oder Implementierungsdetails;
      - nichts in `W`, `S` oder `M` schreiben; kein Commit;
+     - Tests für **neue** Schnittstellen in eigene Dateien, getrennt von Tests für
+       Bestehendes (ein Import einer noch nicht vorhandenen Schnittstelle macht sonst die
+       ganze Datei zum Sammelfehler);
      - einmal gegen den **Basis-Stand** (`M`) laufen lassen: die Tests für neues Verhalten
        müssen dort **rot** sein (sonst prüfen sie nichts), Tests für Bestehendes grün.
    - Rückgabe **nur**: Anzahl Tests je Anforderungs-ID, Liste der Randfall-Kategorien,
@@ -388,7 +399,8 @@ Die **volle** Suite und Artefakt-Builds laufen immer über die Warteschlange
      (Regel 6), dann `{{ACCEPTANCE_RUN}}` (schwer → über die Warteschlange). Der Hauptagent
      liest nur Exit-Code und Zusammenfassung (bestanden/gesamt, IDs der roten Tests).
      - Grün → ins Protokoll („Abnahme N/N, Manifest ok“).
-     - Rot → **Abnahme-Richter** (frischer Agent, Regel 7) schreibt die gefilterte
+     - Rot → **Abnahme-Richter** (frischer Agent, Regel 7; bekommt `Z`, lässt die roten Tests
+       selbst mit vollem Traceback nach `{{SEALED_ROOT}}/out/` laufen) schreibt die gefilterte
        Rückmeldung nach `$S/acceptance-feedback-<n>.md`; der Hauptagent prüft vor der
        Weitergabe nur, dass darin kein Testcode steht (keine `def test`/`assert`/`expect(`-
        Zeilen). Ein **frischer** Fix-Agent bekommt diese Datei + Spec + `W` (Verhalten zuerst
@@ -535,9 +547,9 @@ Die Arbeit geht nie verloren: Push-Sperre freigeben, falls gehalten, eigenes
 Warteschlangen-Ticket löschen; laufenden Rebase abbrechen (`git -C "$W" rebase --abort`),
 offene Änderungen als `wip(factory): <Grund>` committen, wenn `{{ABORT_PUSH_OK}}`: **nur den
 Feature-Branch** sichern (`git -C "$W" push origin {{FEATURE_BRANCH}}`), Grund und Schritt ins
-Protokoll, dann Schritt 8 mit Status „abgebrochen“. `Z` bleibt stehen (Pfad in der
-Lauf-Sperre wird vor dem Freigeben nach `$L/sealed-<slug>` gesichert, damit ein späterer Lauf
-dieselben Tests weiterverwendet). Ein späteres `/factory` mit derselben Idee bzw. demselben
+Protokoll, dann Schritt 8 mit Status „abgebrochen“. `Z` und der Zeiger
+`{{SEALED_ROOT}}/index/<slug>` bleiben stehen, damit ein späterer Lauf dieselben Tests
+weiterverwendet. Ein späteres `/factory` mit derselben Idee bzw. demselben
 Slug setzt dort fort.
 
 ## Stolperfallen (aus echten Läufen)
@@ -549,6 +561,9 @@ Slug setzt dort fort.
   `PYTHONIOENCODING=utf-8` starten (in `&&`-Ketten bricht sonst die ganze Kette).
 - Git-Bash: jeder Pfad an `docker` braucht `MSYS_NO_PATHCONV=1`, sonst wird `/srv/…` zu
   `C:/Program Files/Git/srv/…`.
+- Git-Bash: `$HOME` ist `/c/Users/…`; mit `MSYS_NO_PATHCONV=1` versteht Docker Desktop das
+  nicht. `SEALED_ROOT` (und jeden anderen Mount-Pfad) im Windows-Format setzen, z. B.
+  `$(cygpath -m "$HOME")/.factory-sealed`.
 - `$(pwd)` in einer Subagent-Shell ist der Session-Ordner, nicht der Worktree — Pfade immer
   wörtlich übergeben.
 - Der `security-review`-Skill braucht ein Git-Arbeitsverzeichnis; Reviewer arbeiten mit

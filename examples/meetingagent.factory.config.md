@@ -13,7 +13,7 @@ Zeigt, wie konkret die Slots gemeint sind.
 | `WORKTREE_PATTERN` | `$R/MeetingAgent-<slug>` |
 | `OPENSPEC_DIR` | `$R/openspec` |
 | `LOCK_DIR` | `$R/.factory-locks` |
-| `SEALED_ROOT` | `$HOME/.factory-sealed` |
+| `SEALED_ROOT` | `$(cygpath -m "$HOME")/.factory-sealed` (Windows-Format, sonst findet Docker Desktop den Mount nicht) |
 | `PATH_STYLE` | `windows` |
 | `PROJECT_RULES` | `$M/CLAUDE.md` |
 
@@ -57,7 +57,7 @@ wie TEST_FULL mit `-rA`
 | Slot | Wert |
 |---|---|
 | `ACCEPTANCE_STYLE` | `unit` (pytest gegen die Schnittstellen aus `design.md`, Server per FastAPI-TestClient) + bei UI `blackbox` (Headless-Chrome gegen die Vorschau `:$P`) |
-| `ACCEPTANCE_RUN` | ```MSYS_NO_PATHCONV=1 docker run --rm -v "$W:/src:ro" -v "$Z:/acc:ro" -e WEBUI_SECRET=ci-secret meetingagent-local-webui:latest sh -c "cp -r /src /app && cp -r /acc /app/tests/_acceptance && cd /app && python -m pytest -q -p no:cacheprovider tests/_acceptance"``` |
+| `ACCEPTANCE_RUN` | ```MSYS_NO_PATHCONV=1 docker run --rm -v "$W:/src:ro" -v "$Z:/acc:ro" -e WEBUI_SECRET=ci-secret meetingagent-local-webui:latest sh -c "cp -r /src /app && cp -r /acc /app/tests/_acceptance && cd /app && python -m pytest -q -p no:cacheprovider --tb=no -rf tests/_acceptance" 2>&1 \| sed 's/ - .*$//'``` |
 | `ACCEPTANCE_TIERS` | `M,L` |
 | `ACCEPTANCE_FEEDBACK` | `requirement` |
 | `ACCEPTANCE_COMMIT_DIR` | `tests/acceptance/<slug>/` |
