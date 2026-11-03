@@ -144,6 +144,7 @@ Eine Attrappe/Simulator, gegen die das echte Artefakt läuft (End-to-End). Leer 
 | Slot | Bedeutung | Wert |
 |---|---|---|
 | `PREFLIGHT` | Liste von Prüfungen, die alle stimmen müssen (Remote erreichbar, Werkzeuge da, Instanz antwortet …). | Liste |
+| `AUTOSTART` | Befehle, die fehlende Laufzeit-Voraussetzungen selbst starten (Docker Desktop, `docker compose up -d` …), je mit Wartezeit. | leer |
 | `SECRETS_RULES` | Was nie gelesen/ausgegeben wird (`.env` …), Ausnahmen. | `…` |
 | `COMMIT_STYLE` | Commit-Stil + Sprache. | `feat(<bereich>): …` + `Co-Authored-By` |
 | `POST_RUN_HOOK` | Optionaler Skill/Befehl nach dem Report (z. B. Status an Aufgabentracker). | leer |

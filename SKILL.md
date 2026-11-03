@@ -256,6 +256,9 @@ Die **volle** Suite und Artefakt-Builds laufen immer über die Warteschlange
      dem Zeiger `{{SEALED_ROOT}}/index/<slug>`, fehlt die Datei aber das Manifest steht im Protokoll: Schritt 3b
      neu, neues Manifest). Gibt es Change oder Worktree **ohne** Protokoll: anhalten, nennen
      (Slug ist von Hand oder von einem anderen Werkzeug belegt — anderen Slug vorschlagen).
+   - **Selbst starten, nicht anhalten:** Fehlt eine Laufzeit-Voraussetzung (Docker-Daemon,
+     lokale Instanz), zuerst `{{AUTOSTART}}` ausführen und im Hintergrund warten, bis sie
+     antwortet (ins Protokoll). Erst wenn das scheitert: anhalten und sagen, was fehlt.
    - Preflight, jeder Punkt muss stimmen, sonst anhalten und sagen, was fehlt:
      `{{PREFLIGHT}}`; `git -C "$M" ls-remote origin {{TARGET_BRANCH}}` erreichbar; `openspec`
      und `docker` (falls genutzt) vorhanden; kein eigener alter Container `factory-<slug>-*`

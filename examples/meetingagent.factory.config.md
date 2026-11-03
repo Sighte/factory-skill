@@ -171,6 +171,7 @@ Transkripte **nicht** (`transcripts/` ist im Worktree leer, gitignored). Seed-Sk
 | Slot | Wert |
 |---|---|
 | `PREFLIGHT` | `curl -sI http://127.0.0.1:8080/` antwortet; `openspec`, `node`, `docker` vorhanden |
+| `AUTOSTART` | Docker Desktop starten (`Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"`), bis 5 min auf `docker info` warten; antwortet :8080 dann nicht: `docker compose -f "$R/meetingagent-local/compose.yml" up -d webui`, bis 2 min warten. |
 | `SECRETS_RULES` | keine `.env` lesen (liegt in `$R/meetingagent-local/`), keine echten Mails, keine Secrets ausgeben; in der Vorschau keine Agenten ins Meeting schicken. Ausnahme: `$T/sim.py` liest Keys selbst, Mails landen in Mailpit |
 | `COMMIT_STYLE` | `feat(<bereich>): …` auf Deutsch, mit `Co-Authored-By` |
 | `POST_RUN_HOOK` | `aufgabentracker:wrap` |
