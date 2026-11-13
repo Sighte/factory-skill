@@ -6,7 +6,6 @@ sealed acceptance tests are located; fallback `<repo>/.claude/factory.config.md`
 name only the slot names (`{{TARGET_BRANCH}}` etc.); the values live exclusively here.
 An empty optional slot means: this part of the procedure is skipped.
 
-A filled-in example is in `examples/meetingagent.factory.config.md`.
 
 ---
 

@@ -123,7 +123,6 @@ the project-neutral version. Everything project-specific lives in **one** file,
 | `reviewers.md` | Checklists, responsibilities and response format of the reviewers |
 | `queue.sh` | Queue for heavy jobs (generic, usable unchanged) |
 | `factory.config.example.md` | Template for the project adapter — all slots |
-| `examples/meetingagent.factory.config.md` | Filled-in example from the original project (contains internal names/URLs — remove before publishing the repo) |
 
 ## Requirements
 
